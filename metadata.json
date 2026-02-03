@@ -1,0 +1,5 @@
+{
+  "name": "InfinityFlow AI",
+  "description": "一个用于项目管理的智能无限画布，结合了白板创意、AI 媒体生成 (Gemini/Veo) 和基于智能体的数据分析功能。",
+  "requestFramePermissions": []
+}
