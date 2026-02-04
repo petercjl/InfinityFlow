@@ -136,16 +136,27 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack }) => 
 
   // --- Event Handlers ---
 
+  // Optimized: Only run when selectedId changes, NOT when items change (to avoid re-adding on drag)
   useEffect(() => {
     if (selectedId) {
+        // We use the current state of items here. 
+        // Since this effect only runs on selectedId change, we don't worry about stale items during drag.
         const item = items.find(i => i.id === selectedId);
         if (item && item.type === 'image' && item.content) {
-            if (!contextImages.includes(item.content)) {
-                setContextImages(prev => [...prev, item.content!]);
-            }
+            setContextImages(prev => {
+                if (!prev.includes(item.content!)) {
+                    return [...prev, item.content!];
+                }
+                return prev;
+            });
         }
     }
-  }, [selectedId, items]); 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]); 
+
+  const handleRemoveContextImage = (imgUrl: string) => {
+      setContextImages(prev => prev.filter(img => img !== imgUrl));
+  };
 
   // Native Wheel Event Listener
   useEffect(() => {
@@ -288,6 +299,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack }) => 
                 onClose={() => setIsSidebarOpen(false)}
                 files={files}
                 contextImages={contextImages}
+                onRemoveContextImage={handleRemoveContextImage}
                 onUploadFile={(cat, file) => setFiles(prev => [...prev, file])}
                 onAddContentToCanvas={(items) => {
                     addItems(items);

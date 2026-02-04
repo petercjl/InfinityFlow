@@ -53,11 +53,24 @@ export interface ChatMessage {
 
 export type WorkspaceType = 'personal' | 'team';
 
+// New: View Modes for Dashboard
+export type ViewMode = 'grid-lg' | 'grid-sm' | 'list';
+
+// New: Folder Interface
+export interface Folder {
+  id: string;
+  name: string;
+  workspace: WorkspaceType;
+  parentId: string | null; // For nested folders (optional)
+  createdAt: string;
+}
+
 export interface Board {
   id: string;
   title: string;
   lastModified: string;
   workspace: WorkspaceType;
+  folderId?: string | null; // New: Belong to a folder
   items?: CanvasItem[]; 
   thumbnailColor?: string;
 }

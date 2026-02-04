@@ -14,6 +14,7 @@ interface RightSidebarProps {
   files: ProjectFile[];
   onUploadFile: (category: FileCategory, file: ProjectFile) => void;
   contextImages: string[];
+  onRemoveContextImage: (img: string) => void;
   onAddContentToCanvas: (items: ContentItem[]) => void;
   onSaveReport: (html: string) => void;
 }
@@ -57,6 +58,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   files,
   onUploadFile,
   contextImages,
+  onRemoveContextImage,
   onAddContentToCanvas,
   onSaveReport
 }) => {
@@ -300,7 +302,14 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                         </span>
                         {contextImages.map((img, idx) => (
                             <div key={idx} className="relative w-8 h-8 flex-shrink-0 group cursor-pointer transition-transform hover:scale-105">
-                                <img src={img} className="w-full h-full object-cover rounded-md border border-blue-200 shadow-sm" />
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={img} className="w-full h-full object-cover rounded-md border border-blue-200 shadow-sm" alt="context" />
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); onRemoveContextImage(img); }}
+                                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-slate-100 hover:bg-red-500 border border-slate-300 hover:border-red-600 text-slate-400 hover:text-white rounded-full flex items-center justify-center shadow-sm transition-all opacity-0 group-hover:opacity-100 z-10"
+                                >
+                                    <X size={8} />
+                                </button>
                             </div>
                         ))}
                     </div>
