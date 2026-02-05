@@ -3,7 +3,7 @@ import { CanvasItem, ViewTransform, AgentMode, ProjectFile, Board } from '../typ
 import { Toolbar } from './Toolbar';
 import { CanvasItem as CanvasItemComponent } from './CanvasItem';
 import { RightSidebar } from './RightSidebar';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Edit2 } from 'lucide-react';
 
 // Initial Mock Files
 const INITIAL_FILES: ProjectFile[] = [
@@ -28,15 +28,25 @@ const INITIAL_FILES: ProjectFile[] = [
 interface CanvasEditorProps {
     board: Board;
     onBack: () => void;
+    onRenameBoard: (newName: string) => void;
 }
 
-export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack }) => {
+export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoard }) => {
   // --- State ---
   const [items, setItems] = useState<CanvasItem[]>(board.items || []);
   const [view, setView] = useState<ViewTransform>({ x: 0, y: 0, scale: 1 });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [files, setFiles] = useState<ProjectFile[]>(INITIAL_FILES);
+  
+  // Header Title Editing State
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [tempTitle, setTempTitle] = useState(board.title);
+
+  // Sync tempTitle if board prop changes externally
+  useEffect(() => {
+    setTempTitle(board.title);
+  }, [board.title]);
   
   // Context for Agent (Images selected on canvas)
   const [contextImages, setContextImages] = useState<string[]>([]);
@@ -135,6 +145,19 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack }) => 
   };
 
   // --- Event Handlers ---
+
+  const handleRenameFile = (fileId: string, newName: string) => {
+      setFiles(prev => prev.map(f => f.id === fileId ? { ...f, name: newName } : f));
+  };
+
+  const handleSaveTitle = () => {
+      if (tempTitle.trim() && tempTitle !== board.title) {
+          onRenameBoard(tempTitle.trim());
+      } else {
+          setTempTitle(board.title); // Revert
+      }
+      setIsEditingTitle(false);
+  };
 
   // Optimized: Only run when selectedId changes, NOT when items change (to avoid re-adding on drag)
   useEffect(() => {
@@ -259,11 +282,34 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack }) => 
                 <button onClick={onBack} className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg p-2 hover:bg-slate-50 text-slate-600">
                     <ChevronLeft size={20} />
                 </button>
-                <div className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg px-4 py-2 flex items-center gap-3">
-                    <div className="bg-blue-600 w-8 h-8 rounded flex items-center justify-center text-white font-bold">IF</div>
-                    <div>
-                        <h1 className="text-sm font-bold text-slate-800">{board.title}</h1>
-                        <p className="text-[10px] text-slate-500">{board.workspace === 'team' ? '团队空间' : '个人空间'}</p>
+                <div className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg px-4 py-2 flex items-center gap-3 min-w-[240px] max-w-md">
+                    <div className="bg-blue-600 w-8 h-8 rounded flex items-center justify-center text-white font-bold flex-shrink-0">IF</div>
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                        {isEditingTitle ? (
+                             <input 
+                                autoFocus
+                                className="w-full text-sm font-bold text-slate-800 bg-transparent border-b border-blue-500 outline-none p-0"
+                                value={tempTitle}
+                                onChange={e => setTempTitle(e.target.value)}
+                                onBlur={handleSaveTitle}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter') handleSaveTitle();
+                                    if (e.key === 'Escape') {
+                                        setTempTitle(board.title);
+                                        setIsEditingTitle(false);
+                                    }
+                                }}
+                            />
+                        ) : (
+                            <h1 
+                                onClick={() => setIsEditingTitle(true)}
+                                className="text-sm font-bold text-slate-800 cursor-text hover:bg-slate-100/50 rounded -ml-1 px-1 transition-colors truncate"
+                                title="点击重命名"
+                            >
+                                {board.title}
+                            </h1>
+                        )}
+                        <p className="text-[10px] text-slate-500 leading-none mt-0.5">{board.workspace === 'team' ? '团队空间' : '个人空间'}</p>
                     </div>
                 </div>
             </div>
@@ -315,6 +361,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack }) => 
                     };
                     setFiles(prev => [...prev, newFile]);
                 }}
+                onRenameFile={handleRenameFile}
               />
           </div>
       )}

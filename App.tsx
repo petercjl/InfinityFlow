@@ -66,6 +66,14 @@ export default function App() {
       }
   };
 
+  const handleRenameItem = (itemId: string, isFolder: boolean, newName: string) => {
+    if (isFolder) {
+        setFolders(prev => prev.map(f => f.id === itemId ? { ...f, name: newName } : f));
+    } else {
+        setBoards(prev => prev.map(b => b.id === itemId ? { ...b, title: newName } : b));
+    }
+  };
+
   const handleSelectBoard = (boardId: string) => {
     setActiveBoardId(boardId);
     setCurrentView('editor');
@@ -79,7 +87,13 @@ export default function App() {
   const activeBoard = boards.find(b => b.id === activeBoardId);
 
   if (currentView === 'editor' && activeBoard) {
-    return <CanvasEditor board={activeBoard} onBack={handleBackToDashboard} />;
+    return (
+        <CanvasEditor 
+            board={activeBoard} 
+            onBack={handleBackToDashboard} 
+            onRenameBoard={(newName) => handleRenameItem(activeBoard.id, false, newName)}
+        />
+    );
   }
 
   return (
@@ -91,6 +105,7 @@ export default function App() {
       onSelectBoard={handleSelectBoard} 
       onMoveItem={handleMoveItem}
       onDeleteItem={handleDeleteItem}
+      onRenameItem={handleRenameItem}
     />
   );
 }

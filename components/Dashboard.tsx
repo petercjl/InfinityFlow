@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Board, WorkspaceType, Folder, ViewMode } from '../types';
-import { User, Users, Plus, LayoutGrid, MoreHorizontal, Search, Clock, Folder as FolderIcon, Grid3X3, List, ChevronRight, FolderPlus, ArrowRightLeft, Trash2, X } from 'lucide-react';
+import { User, Users, Plus, LayoutGrid, MoreHorizontal, Search, Clock, Folder as FolderIcon, Grid3X3, List, ChevronRight, FolderPlus, ArrowRightLeft, Trash2, X, Edit2 } from 'lucide-react';
 
 interface DashboardProps {
   boards: Board[];
@@ -10,6 +10,7 @@ interface DashboardProps {
   onSelectBoard: (boardId: string) => void;
   onMoveItem: (itemId: string, isFolder: boolean, targetWorkspace: WorkspaceType, targetFolderId: string | null) => void;
   onDeleteItem: (itemId: string, isFolder: boolean) => void;
+  onRenameItem: (itemId: string, isFolder: boolean, newName: string) => void;
 }
 
 // Mock User for Permissions
@@ -26,7 +27,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     onCreateFolder,
     onSelectBoard,
     onMoveItem,
-    onDeleteItem
+    onDeleteItem,
+    onRenameItem
 }) => {
   const [activeSpace, setActiveSpace] = useState<WorkspaceType>('personal');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -42,6 +44,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [itemToMove, setItemToMove] = useState<{id: string, isFolder: boolean} | null>(null);
   const [moveTargetSpace, setMoveTargetSpace] = useState<WorkspaceType>('personal');
   const [moveTargetFolderId, setMoveTargetFolderId] = useState<string | null>(null);
+
+  // Rename State
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
 
   // Permission Check
   const canManage = activeSpace === 'personal' || (activeSpace === 'team' && MOCK_USER.role === 'admin');
@@ -92,6 +98,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
           setIsMoveModalOpen(false);
           setItemToMove(null);
       }
+  };
+
+  const startRename = (id: string, currentName: string) => {
+      setEditingItemId(id);
+      setEditingName(currentName);
+  };
+
+  const saveRename = (id: string, isFolder: boolean) => {
+      if (editingName.trim()) {
+          onRenameItem(id, isFolder, editingName.trim());
+      }
+      setEditingItemId(null);
+      setEditingName('');
   };
 
   const NavItem = ({ space, icon: Icon, label }: { space: WorkspaceType, icon: any, label: string }) => (
@@ -310,8 +329,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             </div>
         
                             <div className="h-14 px-4 flex items-center justify-between border-t border-slate-100 bg-white relative z-10">
-                                <div className="flex flex-col min-w-0">
-                                    <span className="font-semibold text-slate-800 truncate text-sm">{board.title}</span>
+                                <div className="flex flex-col min-w-0 flex-1 mr-2">
+                                    {editingItemId === board.id ? (
+                                        <input 
+                                            autoFocus
+                                            type="text"
+                                            value={editingName}
+                                            onChange={(e) => setEditingName(e.target.value)}
+                                            onBlur={() => saveRename(board.id, false)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') saveRename(board.id, false);
+                                                if (e.key === 'Escape') setEditingItemId(null);
+                                                e.stopPropagation();
+                                            }}
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="font-semibold text-slate-800 text-sm bg-white border border-blue-400 rounded px-1 outline-none w-full"
+                                        />
+                                    ) : (
+                                        <span className="font-semibold text-slate-800 truncate text-sm" title={board.title}>{board.title}</span>
+                                    )}
                                     <div className="flex items-center gap-1 text-[10px] text-slate-500">
                                         <Clock size={10} />
                                         <span>{board.lastModified}</span>
@@ -323,6 +359,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                             <MoreHorizontal size={16} />
                                         </button>
                                         <div className="absolute bottom-full right-0 mb-1 w-28 bg-white border shadow-lg rounded-lg py-1 hidden group-hover/menu:block z-20">
+                                            <button onClick={() => startRename(board.id, board.title)} className="w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-slate-700 flex items-center gap-2">
+                                                <Edit2 size={12}/> 重命名
+                                            </button>
                                             <button onClick={() => openMoveModal(board.id, false)} className="w-full text-left px-4 py-2 text-xs hover:bg-slate-50 text-slate-700 flex items-center gap-2">
                                                 <ArrowRightLeft size={12}/> 移动
                                             </button>

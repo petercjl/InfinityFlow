@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ProjectFile, FileCategory, ChatMessage, AgentCategory, AIModel } from '../types';
-import { Sparkles, Send, FileText, CheckCircle, Upload, X, ChevronDown, Check, Bot, User, Settings2, Cpu, Grid } from 'lucide-react';
+import { Sparkles, Send, FileText, CheckCircle, Upload, X, ChevronDown, Check, Bot, User, MoreHorizontal, Edit2, ArrowRightLeft, Trash2 } from 'lucide-react';
 import { chatWithAgent } from '../services/geminiService';
 
 interface ContentItem {
@@ -17,6 +17,7 @@ interface RightSidebarProps {
   onRemoveContextImage: (img: string) => void;
   onAddContentToCanvas: (items: ContentItem[]) => void;
   onSaveReport: (html: string) => void;
+  onRenameFile?: (fileId: string, newName: string) => void;
 }
 
 // --- Data Constants ---
@@ -60,7 +61,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   contextImages,
   onRemoveContextImage,
   onAddContentToCanvas,
-  onSaveReport
+  onSaveReport,
+  onRenameFile
 }) => {
   const [activeTab, setActiveTab] = useState<'chat' | 'files'>('chat');
   
@@ -82,6 +84,10 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   // UI State for Popovers
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [selectorTab, setSelectorTab] = useState<'main' | 'image' | 'video'>('main');
+
+  // File Renaming State
+  const [editingFileId, setEditingFileId] = useState<string | null>(null);
+  const [tempFileName, setTempFileName] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -217,6 +223,25 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
   const getSelectorIcon = () => {
       if (assistantMode === 'agent') return <Bot size={14} className="text-green-600" />;
       return <Sparkles size={14} className="text-blue-600" />;
+  };
+
+  const startRenameFile = (file: ProjectFile) => {
+      setEditingFileId(file.id);
+      setTempFileName(file.name);
+  };
+
+  const saveRenameFile = (file: ProjectFile) => {
+      if (onRenameFile && tempFileName.trim()) {
+          let finalName = tempFileName.trim();
+          const originalExt = file.name.split('.').pop();
+          // If original file had an extension, ensure new name has it
+          if (originalExt && file.name.includes('.') && !finalName.endsWith(`.${originalExt}`)) {
+             finalName = `${finalName}.${originalExt}`;
+          }
+          onRenameFile(file.id, finalName);
+      }
+      setEditingFileId(null);
+      setTempFileName('');
   };
 
   if (!isOpen) return null;
@@ -515,9 +540,48 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({
                                   {catFiles.length > 0 && (
                                       <div className="flex flex-col gap-1 mb-2">
                                           {catFiles.map(f => (
-                                              <div key={f.id} className="text-xs text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100 flex items-center gap-3">
+                                              <div key={f.id} className="group relative text-xs text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100 flex items-center gap-3">
                                                   <div className="p-1 bg-white rounded border border-slate-200 text-blue-500"><FileText size={12} /></div>
-                                                  <span className="truncate flex-1 font-medium">{f.name}</span>
+                                                  
+                                                  <div className="flex-1 min-w-0">
+                                                      {editingFileId === f.id ? (
+                                                          <input 
+                                                            autoFocus
+                                                            type="text"
+                                                            value={tempFileName}
+                                                            onChange={e => setTempFileName(e.target.value)}
+                                                            onBlur={() => saveRenameFile(f)}
+                                                            onKeyDown={e => {
+                                                                if(e.key === 'Enter') saveRenameFile(f);
+                                                                if(e.key === 'Escape') setEditingFileId(null);
+                                                            }}
+                                                            className="w-full bg-white border border-blue-400 rounded px-1 outline-none"
+                                                          />
+                                                      ) : (
+                                                        <span className="truncate block font-medium" title={f.name}>{f.name}</span>
+                                                      )}
+                                                  </div>
+
+                                                  {onRenameFile && (
+                                                      <div className="absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-50 pl-2">
+                                                          <div className="relative group/menu">
+                                                                <button className="p-1 hover:bg-slate-200 rounded text-slate-500">
+                                                                    <MoreHorizontal size={14} />
+                                                                </button>
+                                                                <div className="absolute right-0 top-full mt-1 w-24 bg-white border shadow-lg rounded-lg py-1 hidden group-hover/menu:block z-10">
+                                                                    <button 
+                                                                        onClick={() => startRenameFile(f)} 
+                                                                        className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 flex gap-2 text-slate-700"
+                                                                    >
+                                                                        <Edit2 size={12}/> 重命名
+                                                                    </button>
+                                                                    {/* Placeholders for future impl */}
+                                                                    <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 flex gap-2 text-slate-400 cursor-not-allowed"><ArrowRightLeft size={12}/> 移动</button>
+                                                                    <button className="w-full text-left px-3 py-1.5 text-xs hover:bg-red-50 flex gap-2 text-red-400 cursor-not-allowed"><Trash2 size={12}/> 删除</button>
+                                                                </div>
+                                                          </div>
+                                                      </div>
+                                                  )}
                                               </div>
                                           ))}
                                       </div>
