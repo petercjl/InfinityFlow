@@ -1,4 +1,4 @@
-import { ProjectFile } from "../types";
+import { ProjectFile, CanvasItem } from "../types";
 
 const API_BASE = '/api';
 
@@ -115,4 +115,24 @@ export const runAnalysisWorkflow = async (files: ProjectFile[], userQuery: strin
     console.error("Analysis workflow failed", e);
     return "<p>生成报告时出错，请检查网络连接。</p>";
   }
+};
+
+/**
+ * Save Board Items
+ * PUT /api/boards/{boardId}/items
+ */
+export const saveBoardItems = async (boardId: string, items: CanvasItem[]): Promise<void> => {
+    try {
+        await fetch(`${API_BASE}/boards/${boardId}/items`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(items),
+            keepalive: true // Ensures request completes even if page unloads
+        });
+    } catch (e) {
+        console.error("Failed to save board items", e);
+        // Not throwing to avoid blocking UI flow, but logged for debugging
+    }
 };

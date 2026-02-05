@@ -3,7 +3,8 @@ import { CanvasItem, ViewTransform, AgentMode, ProjectFile, Board } from '../typ
 import { Toolbar } from './Toolbar';
 import { CanvasItem as CanvasItemComponent } from './CanvasItem';
 import { RightSidebar } from './RightSidebar';
-import { ChevronLeft, ChevronRight, Edit2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Edit2, Cloud, Check, Loader2 } from 'lucide-react';
+import { saveBoardItems } from '../services/geminiService';
 
 // Initial Mock Files
 const INITIAL_FILES: ProjectFile[] = [
@@ -39,6 +40,10 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [files, setFiles] = useState<ProjectFile[]>(INITIAL_FILES);
   
+  // Save Status State
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
   // Header Title Editing State
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [tempTitle, setTempTitle] = useState(board.title);
@@ -56,6 +61,65 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const isPanningRef = useRef(false); // Distinguish between panning and item dragging
   const canvasRef = useRef<HTMLDivElement>(null);
+
+  // --- Auto Save Logic ---
+
+  const performSave = async (currentItems: CanvasItem[]) => {
+      setSaveStatus('saving');
+      try {
+          await saveBoardItems(board.id, currentItems);
+          setSaveStatus('saved');
+      } catch (e) {
+          console.error('Auto-save failed', e);
+          setSaveStatus('unsaved'); // keep unsaved state on error
+      }
+  };
+
+  // Debounce Effect: Trigger save 1.5s after items change
+  useEffect(() => {
+      // Skip initial load or if items are identical to props (optimization optional)
+      
+      if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+      }
+      
+      setSaveStatus('unsaved');
+
+      saveTimeoutRef.current = setTimeout(() => {
+          performSave(items);
+      }, 1500);
+
+      return () => {
+          if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      };
+  }, [items, board.id]);
+
+  // Handle Before Unload (Attempt to save when closing tab)
+  useEffect(() => {
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+          if (saveStatus === 'unsaved' || saveStatus === 'saving') {
+              // We rely on performSave logic or direct call. 
+              // Note: fetch with keepalive is used in service.
+              saveBoardItems(board.id, items);
+          }
+      };
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [items, board.id, saveStatus]);
+
+  // Handle Back Button with Immediate Save
+  const handleBackClick = async () => {
+      if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+      }
+      // If currently saving or unsaved, force a save before leaving
+      if (saveStatus !== 'saved') {
+          setSaveStatus('saving');
+          await saveBoardItems(board.id, items);
+      }
+      onBack();
+  };
+
 
   // --- Helpers ---
   
@@ -279,7 +343,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
         {/* Top Header */}
         <div className="absolute top-4 left-4 right-4 h-14 pointer-events-none flex justify-between items-start z-30">
             <div className="flex items-center gap-3 pointer-events-auto">
-                <button onClick={onBack} className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg p-2 hover:bg-slate-50 text-slate-600">
+                <button onClick={handleBackClick} className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg p-2 hover:bg-slate-50 text-slate-600">
                     <ChevronLeft size={20} />
                 </button>
                 <div className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg px-4 py-2 flex items-center gap-3 min-w-[240px] max-w-md">
@@ -301,16 +365,25 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
                                 }}
                             />
                         ) : (
-                            <h1 
-                                onClick={() => setIsEditingTitle(true)}
-                                className="text-sm font-bold text-slate-800 cursor-text hover:bg-slate-100/50 rounded -ml-1 px-1 transition-colors truncate"
-                                title="点击重命名"
-                            >
-                                {board.title}
-                            </h1>
+                            <div className="flex items-center gap-2">
+                                <h1 
+                                    onClick={() => setIsEditingTitle(true)}
+                                    className="text-sm font-bold text-slate-800 cursor-text hover:bg-slate-100/50 rounded -ml-1 px-1 transition-colors truncate"
+                                    title="点击重命名"
+                                >
+                                    {board.title}
+                                </h1>
+                            </div>
                         )}
                         <p className="text-[10px] text-slate-500 leading-none mt-0.5">{board.workspace === 'team' ? '团队空间' : '个人空间'}</p>
                     </div>
+                </div>
+
+                {/* Save Status Indicator */}
+                <div className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg px-3 py-2 flex items-center gap-2 text-[10px] font-medium text-slate-500">
+                    {saveStatus === 'saving' && <><Loader2 size={12} className="animate-spin" /> 保存中...</>}
+                    {saveStatus === 'saved' && <><Check size={12} className="text-green-500" /> 已保存</>}
+                    {saveStatus === 'unsaved' && <><Cloud size={12} /> 未保存</>}
                 </div>
             </div>
              <div className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg px-2 py-2 pointer-events-auto flex items-center gap-2">
