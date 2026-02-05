@@ -38,18 +38,18 @@ const AGENT_CATEGORIES: AgentCategory[] = [
 ];
 
 const CORE_MODELS: AIModel[] = [
-    { id: 'gemini-3-pro-preview', name: 'Gemini 3.0 Pro (Thinking)', type: 'chat' },
-    { id: 'gemini-3-flash-preview', name: 'Gemini 3.0 Flash', type: 'chat' },
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', type: 'chat' },
+    { id: 'qwen-plus-latest', name: '千问 Plus', type: 'chat' },
+    { id: 'doubao-seed-1-8-251228', name: '豆包 Seed 1.8', type: 'chat' },
 ];
 
 const IMAGE_MODELS: AIModel[] = [
-    { id: 'gemini-2.5-flash-image', name: 'Gemini 2.5 Flash', type: 'image' },
-    { id: 'imagen-3', name: 'Imagen 3.0', type: 'image' },
+    { id: 'nano-banana-2-4k', name: 'Gemini 图片 4K', type: 'image' },
+    { id: 'doubao-seedream-4-5-251128', name: '豆包即梦', type: 'image' },
 ];
 
 const VIDEO_MODELS: AIModel[] = [
-    { id: 'veo-3.1-fast-generate-preview', name: 'Google Veo 3.1', type: 'video' },
+    { id: 'veo3', name: 'Google Veo 3', type: 'video' },
+    { id: 'doubao-seedance-1-5-pro-251215', name: '豆包即舞', type: 'video' },
 ];
 
 export const RightSidebar: React.FC<RightSidebarProps> = ({

@@ -21,7 +21,7 @@ const GeneratorWidget: React.FC<{
     const [result, setResult] = useState<string | null>(item.content || null);
     
     // Config State
-    const [model, setModel] = useState(type === 'image' ? 'gemini-2.5-flash-image' : 'kling-2.6');
+    const [model, setModel] = useState(type === 'image' ? 'nano-banana-2-4k' : 'veo3');
     const [aspectRatio, setAspectRatio] = useState('1:1');
     const [resolution, setResolution] = useState(type === 'image' ? '1K' : '720p');
     const [duration, setDuration] = useState('5s');
@@ -36,7 +36,7 @@ const GeneratorWidget: React.FC<{
                 // In a real app, update the parent item.content here
             } else {
                 // Using Veo as the real backed, but UI says Kling per screenshot requirements (simulation)
-                const realModel = model.includes('veo') ? model : 'veo-3.1-fast-generate-preview';
+                const realModel = model.includes('veo') ? model : 'veo3';
                 const url = await generateVideo(prompt, realModel);
                 setResult(url);
             }
@@ -116,7 +116,7 @@ const GeneratorWidget: React.FC<{
 
                          <button className="flex items-center gap-1 text-[10px] text-slate-600 font-medium hover:text-blue-600">
                              {type === 'image' ? <ImageIcon size={10} /> : <Video size={10} />}
-                             <span>{type === 'image' ? 'Gemini 2.5 Flash' : 'Veo 3.1'}</span>
+                             <span>{type === 'image' ? 'Gemini 图片 4K' : 'Google Veo 3'}</span>
                              <ChevronDown size={10} />
                          </button>
                      </div>
