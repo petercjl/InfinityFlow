@@ -119,11 +119,11 @@ export const runAnalysisWorkflow = async (files: ProjectFile[], userQuery: strin
 
 /**
  * Save Board Items
- * PUT /api/boards/{boardId}/items
+ * PUT /api/boards/{boardId}/items/sync
  */
 export const saveBoardItems = async (boardId: string, items: CanvasItem[]): Promise<void> => {
     try {
-        await fetch(`${API_BASE}/boards/${boardId}/items`, {
+        await fetch(`${API_BASE}/boards/${boardId}/items/sync`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json',
