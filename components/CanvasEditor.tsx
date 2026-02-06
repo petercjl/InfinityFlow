@@ -203,6 +203,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
     const getTypeDims = (type: string) => {
         if (type === 'text') return { w: 200, h: 100 };
         if (type === 'note') return { w: 200, h: 200 };
+        if (type === 'mindmap') return { w: 600, h: 400 };
         if (type === 'html') return { w: 500, h: 600 };
         if (type === 'image-generator') return { w: 400, h: 480 }; // Includes space for control panel
         if (type === 'video-generator') return { w: 480, h: 400 };
@@ -455,6 +456,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
         <Toolbar 
             onAddText={() => addItems([{ type: 'text', content: '输入文本' }])}
             onAddNote={() => addItems([{ type: 'note', content: '新想法' }])}
+            onAddMindMap={() => addItems([{ type: 'mindmap', content: '' }])}
             onAddShape={() => addItems([{ type: 'shape', content: '' }])}
             onAddImageGen={() => addItems([{ type: 'image-generator', content: '' }])}
             onAddVideoGen={() => addItems([{ type: 'video-generator', content: '' }])}

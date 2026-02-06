@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { CanvasItem as CanvasItemType } from '../types';
 import { Image as ImageIcon, Video, Play, Zap, ChevronDown, Plus, Trash2, Bold } from 'lucide-react';
 import { generateImage, generateVideo } from '../services/geminiService';
+import { MindMap } from './MindMap/MindMap';
 
 interface CanvasItemProps {
   item: CanvasItemType;
@@ -176,6 +177,8 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, scale,
   let containerClass = `w-full h-full transition-shadow ${isGenerator ? '' : 'rounded-lg overflow-visible'} ${selectionClass}`;
   if (item.type === 'text') {
       containerClass = `w-full h-full transition-shadow ${selectionClass} bg-white/90 backdrop-blur-sm border border-slate-200`;
+  } else if (item.type === 'mindmap') {
+      containerClass = `w-full h-full transition-shadow ${selectionClass} bg-white border border-slate-200 shadow-sm`;
   }
 
   // Handle Resize
@@ -357,19 +360,20 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, scale,
           </div>
         );
       case 'mindmap': 
-        const data = JSON.parse(item.content || '{}');
+        let parsedData = {};
+        try {
+            parsedData = item.content ? JSON.parse(item.content) : {};
+        } catch(e) {
+            console.error('Failed to parse mindmap data', e);
+        }
         return (
-             <div className={`w-full h-full bg-white border border-slate-200 flex flex-col shadow-lg p-4 rounded-lg overflow-hidden`}>
-                <h3 className="font-bold text-lg mb-4 text-center border-b pb-2">{data.title}</h3>
-                <div className="flex flex-col gap-4 overflow-y-auto">
-                    {data.sections?.map((sec: any, idx: number) => (
-                        <div key={idx} className="bg-slate-50 p-3 rounded border border-slate-100">
-                            <h4 className="font-semibold text-blue-600 text-sm">{sec.title}</h4>
-                            <p className="text-xs text-slate-600 mt-1">{sec.content}</p>
-                        </div>
-                    ))}
-                </div>
-             </div>
+             <MindMap 
+                initialData={parsedData}
+                isEditable={isSelected}
+                onChange={(data) => {
+                    onUpdate({ content: JSON.stringify(data) });
+                }}
+             />
         );
       default:
         return <div className="w-full h-full flex items-center justify-center bg-white border">Unknown</div>;

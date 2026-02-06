@@ -1,10 +1,11 @@
 import React from 'react';
-import { Square, Type, MousePointer2, Image as ImageIcon, Video, StickyNote } from 'lucide-react';
+import { Square, Type, MousePointer2, Image as ImageIcon, Video, StickyNote, GitBranch } from 'lucide-react';
 
 interface ToolbarProps {
   onAddText: () => void;
   onAddNote: () => void;
   onAddShape: () => void;
+  onAddMindMap: () => void;
   onAddImageGen: () => void;
   onAddVideoGen: () => void;
   setModeSelect: () => void; // Reset to selection mode
@@ -15,6 +16,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onAddText,
   onAddNote, 
   onAddShape,
+  onAddMindMap,
   onAddImageGen,
   onAddVideoGen, 
   setModeSelect,
@@ -46,6 +48,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
         <button className={btnClass(false)} onClick={onAddShape} title="添加形状">
           <Square size={20} />
+        </button>
+        <button className={btnClass(false)} onClick={onAddMindMap} title="添加思维导图">
+          <GitBranch size={20} />
         </button>
 
         <div className="h-px w-full bg-slate-200 my-1"></div>
