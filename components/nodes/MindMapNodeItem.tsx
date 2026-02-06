@@ -6,9 +6,23 @@ import { MindMapData } from '../../types';
 
 const MindMapNodeItem = ({ data, selected, id }: NodeProps) => {
   // Parse content from string if needed, or use default
-  const mindMapData: MindMapData | undefined = data.content && typeof data.content === 'string' 
-    ? JSON.parse(data.content) 
-    : undefined;
+  let mindMapData: MindMapData | undefined = undefined;
+  
+  if (data.content && typeof data.content === 'string') {
+    try {
+        const parsed = JSON.parse(data.content);
+        // Basic validation to ensure it looks like mindmap data
+        if (parsed && typeof parsed === 'object') {
+            mindMapData = parsed;
+        }
+    } catch (e) {
+        // console.warn("MindMapNodeItem: Content is not valid JSON, using default.", data.content);
+        // Fallback is handled by MindMap component (using DEFAULT_DATA)
+    }
+  } else if (typeof data.content === 'object') {
+      // Handle case where it might already be an object
+      mindMapData = data.content;
+  }
 
   const handleChange = useCallback((newData: MindMapData) => {
       // Serialize back to string for storage in CanvasItem

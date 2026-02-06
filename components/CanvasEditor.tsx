@@ -215,8 +215,8 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
                 onContentChange: (val: string) => onNodeContentChange(newNode.id, val)
             },
             style: { 
-                width: type === 'note' ? 200 : type === 'mindmap-node' ? 150 : 300, 
-                height: type === 'note' ? 200 : type === 'mindmap-node' ? 50 : 300 
+                width: type === 'note' ? 200 : type === 'mindmap-node' ? 400 : 300, 
+                height: type === 'note' ? 200 : type === 'mindmap-node' ? 300 : 300 
             },
         };
 
@@ -248,6 +248,18 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
             });
         }
     }, []);
+
+    // Initial structure for new MindMaps
+    const getDefaultMindMapJSON = () => {
+        return JSON.stringify({
+            rootId: 'root',
+            nodes: {
+                'root': { id: 'root', text: '中心主题', parentId: null, children: ['sub1', 'sub2'] },
+                'sub1': { id: 'sub1', text: '分支 1', parentId: 'root', children: [] },
+                'sub2': { id: 'sub2', text: '分支 2', parentId: 'root', children: [] }
+            }
+        });
+    };
 
     return (
         <div className="w-full h-full flex bg-slate-100 font-sans overflow-hidden">
@@ -333,7 +345,7 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
                 <Toolbar 
                     onAddText={() => handleAddNode('text', '')}
                     onAddNote={() => handleAddNode('note', '')}
-                    onAddMindMapNode={() => handleAddNode('mindmap-node', '新节点')}
+                    onAddMindMapNode={() => handleAddNode('mindmap-node', getDefaultMindMapJSON())}
                     onAddShape={() => handleAddNode('general', 'Shape', 'shape')}
                     onAddImageGen={() => handleAddNode('general', '', 'image-generator')}
                     onAddVideoGen={() => handleAddNode('general', '', 'video-generator')}
