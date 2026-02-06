@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Board, WorkspaceType, Folder, ViewMode } from '../types';
 import { User, Users, Plus, LayoutGrid, MoreHorizontal, Search, Clock, Folder as FolderIcon, Grid3X3, List, ChevronRight, FolderPlus, ArrowRightLeft, Trash2, X, Edit2 } from 'lucide-react';
 
@@ -11,6 +11,7 @@ interface DashboardProps {
   onMoveItem: (itemId: string, isFolder: boolean, targetWorkspace: WorkspaceType, targetFolderId: string | null) => void;
   onDeleteItem: (itemId: string, isFolder: boolean) => void;
   onRenameItem: (itemId: string, isFolder: boolean, newName: string) => void;
+  initialSpace?: WorkspaceType | null;
 }
 
 // Mock User for Permissions
@@ -28,7 +29,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     onSelectBoard,
     onMoveItem,
     onDeleteItem,
-    onRenameItem
+    onRenameItem,
+    initialSpace
 }) => {
   const [activeSpace, setActiveSpace] = useState<WorkspaceType>('personal');
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
@@ -48,6 +50,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Rename State
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+
+  // Restore active space from props if provided
+  useEffect(() => {
+    if (initialSpace) {
+        setActiveSpace(initialSpace);
+    }
+  }, [initialSpace]);
 
   // Permission Check
   const canManage = activeSpace === 'personal' || (activeSpace === 'team' && MOCK_USER.role === 'admin');

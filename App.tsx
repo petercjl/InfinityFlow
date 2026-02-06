@@ -20,6 +20,7 @@ export default function App() {
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null);
   const [boards, setBoards] = useState<Board[]>(INITIAL_BOARDS);
   const [folders, setFolders] = useState<Folder[]>(INITIAL_FOLDERS);
+  const [returnToSpace, setReturnToSpace] = useState<WorkspaceType | null>(null);
 
   const handleCreateBoard = (workspace: WorkspaceType, folderId: string | null) => {
     const newBoard: Board = {
@@ -80,6 +81,10 @@ export default function App() {
   };
 
   const handleBackToDashboard = () => {
+    const currentBoard = boards.find(b => b.id === activeBoardId);
+    if (currentBoard) {
+        setReturnToSpace(currentBoard.workspace);
+    }
     setActiveBoardId(null);
     setCurrentView('dashboard');
   };
@@ -106,6 +111,7 @@ export default function App() {
       onMoveItem={handleMoveItem}
       onDeleteItem={handleDeleteItem}
       onRenameItem={handleRenameItem}
+      initialSpace={returnToSpace}
     />
   );
 }
