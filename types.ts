@@ -1,20 +1,15 @@
 
-export type ItemType = 'note' | 'text' | 'image' | 'video' | 'shape' | 'mindmap-node' | 'report' | 'html' | 'image-generator' | 'video-generator' | 'mindmap';
+export type ItemType = 'note' | 'text' | 'image' | 'video' | 'shape' | 'html' | 'image-generator' | 'video-generator' | 'mindmap-root' | 'mindmap-child';
 
-// Internal MindMap Node Structure
+// Helper interface for node data specific to mind maps
 export interface MindMapNodeData {
-  id: string;
-  text: string;
-  parentId: string | null;
-  children: string[]; // IDs of children
+  label: string;
+  isRoot?: boolean;
+  parentId?: string; // For logical traversal
   isCollapsed?: boolean;
-  order?: number; // For manual ordering among siblings
-}
-
-// The full data structure stored in CanvasItem.content (as stringified JSON)
-export interface MindMapData {
-  rootId: string;
-  nodes: Record<string, MindMapNodeData>;
+  // Dynamic layout helpers
+  depth?: number;
+  order?: number;
 }
 
 export interface CanvasItem {
@@ -24,7 +19,7 @@ export interface CanvasItem {
   y: number;
   width: number;
   height: number;
-  content?: string; // Text content, Image/Video URL, HTML string, or JSON for MindMap
+  content?: string; // For mindmaps, this is the text label
   color?: string;
   meta?: {
     fontSize?: number;
@@ -32,8 +27,10 @@ export interface CanvasItem {
     fontWeight?: string;
     backgroundColor?: string;
     depth?: number; // For mindmap
-    theme?: string; // For mindmap
-    [key: string]: any; // For extra data like original prompt, analysis source, etc.
+    rootId?: string; // ID of the root node this belongs to
+    parentId?: string; // ID of the immediate parent
+    isCollapsed?: boolean;
+    [key: string]: any; 
   }; 
 }
 

@@ -1,263 +1,111 @@
 
-import { MindMapData, MindMapNodeData } from '../../types';
+import { Node, Edge } from 'reactflow';
 
-export interface LayoutNode {
+// Constants for layout
+const NODE_WIDTH_ROOT = 160;
+const NODE_WIDTH_CHILD = 120;
+const NODE_HEIGHT = 40;
+const HORIZONTAL_GAP = 80;
+const VERTICAL_GAP = 20;
+
+interface LayoutNode {
   id: string;
-  data: MindMapNodeData;
-  x: number;
-  y: number;
   width: number;
   height: number;
-  depth: number;
-  color: string;
+  children: LayoutNode[];
+  x: number;
+  y: number;
 }
 
-const NODE_HEIGHT = 40;
-const NODE_H_GAP = 50;  // Horizontal gap between parent and child
-const NODE_V_GAP = 12;  // Vertical gap between siblings
-const CHAR_WIDTH = 14;  // Approximate width per character
-const BASE_PADDING = 24;
-
-const COLORS = [
-  '#3b82f6', // blue (root)
-  '#ef4444', // red
-  '#f59e0b', // amber
-  '#10b981', // green
-  '#8b5cf6', // violet
-  '#ec4899', // pink
-];
-
 /**
- * Calculates the size (width/height) of a node based on text
+ * Recalculates the positions of a mind map tree.
+ * Returns an array of node updates { id, position }.
  */
-const measureNode = (text: string, depth: number): { width: number, height: number } => {
-  const isRoot = depth === 0;
-  // Simple estimation. In a real app, use a hidden canvas or DOM element to measure.
-  const width = Math.max(isRoot ? 120 : 80, text.length * CHAR_WIDTH + BASE_PADDING);
-  const height = isRoot ? 50 : 36;
-  return { width, height };
-};
-
-/**
- * Main Layout Function
- * 1. Measures all nodes
- * 2. Recursively calculates sub-tree heights
- * 3. Assigns X/Y coordinates
- */
-export const calculateMindMapLayout = (data: MindMapData): { nodes: LayoutNode[], width: number, height: number } => {
-  const { rootId, nodes } = data;
-  const layoutNodes: Record<string, LayoutNode> = {};
+export const recalculateMindMapLayout = (
+  rootId: string, 
+  allNodes: Node[], 
+  allEdges: Edge[]
+): { id: string, position: { x: number, y: number } }[] => {
   
-  if (!rootId || !nodes[rootId]) return { nodes: [], width: 0, height: 0 };
+  // 1. Build the tree structure
+  const buildTree = (nodeId: string): LayoutNode => {
+    const node = allNodes.find(n => n.id === nodeId);
+    if (!node) return { id: nodeId, width: 0, height: 0, children: [], x: 0, y: 0 };
 
-  // Helper to get children sorted by order (if needed)
-  const getChildren = (id: string) => {
-    const node = nodes[id];
-    if (!node.children || (node.isCollapsed && node.children.length > 0)) return [];
-    return node.children.map(cid => nodes[cid]).filter(Boolean);
-  };
+    // Find outgoing edges from this node
+    const childEdges = allEdges.filter(e => e.source === nodeId);
+    // Sort children by their Y position to maintain visual order stability if possible, 
+    // or by a specific 'order' meta property if we added one. 
+    // For now, we rely on the edge order or existing Y to keep stability.
+    const childNodes = childEdges
+      .map(e => allNodes.find(n => n.id === e.target))
+      .filter((n): n is Node => !!n)
+      .sort((a, b) => a.position.y - b.position.y);
 
-  // 1. Measure & Initialize
-  const initialize = (id: string, depth: number): LayoutNode => {
-    const nodeData = nodes[id];
-    const { width, height } = measureNode(nodeData.text, depth);
-    const layoutNode: LayoutNode = {
-      id,
-      data: nodeData,
-      x: 0,
-      y: 0,
+    const isRoot = node.type === 'mindmap-root';
+    const width = isRoot ? NODE_WIDTH_ROOT : NODE_WIDTH_CHILD; // Or dynamic based on text length
+    const height = NODE_HEIGHT;
+
+    return {
+      id: nodeId,
       width,
       height,
-      depth,
-      color: depth === 0 ? COLORS[0] : COLORS[(depth - 1) % (COLORS.length - 1) + 1]
+      children: node.data.isCollapsed ? [] : childNodes.map(c => buildTree(c.id)),
+      x: 0, 
+      y: 0
     };
-    layoutNodes[id] = layoutNode;
-    
-    getChildren(id).forEach(child => initialize(child.id, depth + 1));
-    return layoutNode;
   };
 
-  initialize(rootId, 0);
+  const root = buildTree(rootId);
+  const updates: { id: string, position: { x: number, y: number } }[] = [];
 
-  // 2. Post-order traversal to calculate subtree heights
-  const subtreeHeights: Record<string, number> = {};
-  
-  const calcHeight = (id: string): number => {
-    const children = getChildren(id);
-    if (children.length === 0) {
-      subtreeHeights[id] = layoutNodes[id].height;
-      return subtreeHeights[id];
+  // 2. Calculate Layout (Right-to-Left Tree)
+  // First, post-order traversal to calculate subtree heights
+  const calcSubtreeHeight = (node: LayoutNode): number => {
+    if (node.children.length === 0) {
+      return node.height;
     }
-
-    let totalHeight = 0;
-    children.forEach(child => {
-      totalHeight += calcHeight(child.id);
-    });
-    
-    // Add vertical gaps between children
-    totalHeight += (children.length - 1) * NODE_V_GAP;
-    
-    // The node's subtree height is max of its own height vs children total
-    subtreeHeights[id] = Math.max(layoutNodes[id].height, totalHeight);
-    return subtreeHeights[id];
+    const childrenHeight = node.children.reduce((acc, child) => acc + calcSubtreeHeight(child), 0);
+    const gaps = (node.children.length - 1) * VERTICAL_GAP;
+    return Math.max(node.height, childrenHeight + gaps);
   };
 
-  calcHeight(rootId);
+  // 3. Pre-order traversal to assign positions
+  const assignPositions = (node: LayoutNode, x: number, y: number, subtreeHeight: number) => {
+    // Center node vertically in its allocated subtree space
+    const nodeY = y + (subtreeHeight - node.height) / 2;
+    
+    updates.push({
+      id: node.id,
+      position: { x, y: nodeY }
+    });
 
-  // 3. Pre-order traversal to set coordinates
-  let maxX = 0;
-  let maxY = 0;
-
-  const setPositions = (id: string, x: number, y: number) => {
-    const node = layoutNodes[id];
-    node.x = x;
-    node.y = y + (subtreeHeights[id] - node.height) / 2; // Center node relative to its subtree
-
-    maxX = Math.max(maxX, node.x + node.width);
-    maxY = Math.max(maxY, node.y + node.height);
-
-    const children = getChildren(id);
-    if (children.length > 0) {
+    if (node.children.length > 0) {
       let currentY = y;
-      const nextX = x + node.width + NODE_H_GAP;
+      const nextX = x + node.width + HORIZONTAL_GAP;
 
-      children.forEach(child => {
-        const childHeight = subtreeHeights[child.id];
-        // Position child vertically centered within its allocated slot
-        setPositions(child.id, nextX, currentY);
-        currentY += childHeight + NODE_V_GAP;
+      node.children.forEach(child => {
+        const h = calcSubtreeHeight(child);
+        assignPositions(child, nextX, currentY, h);
+        currentY += h + VERTICAL_GAP;
       });
     }
   };
 
-  // Start positioning from (0,0) - container will center it or handle offset
-  setPositions(rootId, 50, 50);
-
-  return {
-    nodes: Object.values(layoutNodes),
-    width: maxX + 50,
-    height: maxY + 50
-  };
-};
-
-/**
- * Helpers for Tree Mutation
- */
-export const createNode = (text: string = '新节点'): MindMapNodeData => ({
-  id: `node-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-  text,
-  parentId: null,
-  children: [],
-});
-
-export const addChildNode = (data: MindMapData, parentId: string, text?: string): MindMapData => {
-  const newNode = createNode(text || '子节点');
-  newNode.parentId = parentId;
+  const rootHeight = calcSubtreeHeight(root);
   
-  const newNodes = { ...data.nodes };
-  newNodes[newNode.id] = newNode;
-  newNodes[parentId] = {
-    ...newNodes[parentId],
-    children: [...(newNodes[parentId].children || []), newNode.id],
-    isCollapsed: false // Auto expand when adding child
-  };
+  // Keep root at its current visual position (or 0,0 if new)
+  // To avoid the root jumping around, we might want to get the *current* root position from allNodes
+  const originalRoot = allNodes.find(n => n.id === rootId);
+  const startX = originalRoot ? originalRoot.position.x : 0;
+  const startY = originalRoot ? originalRoot.position.y : 0;
 
-  return { ...data, nodes: newNodes };
-};
+  // We actually want the subtree centered on the root's Y.
+  // The layout logic `assignPositions` assumes (x,y) is top-left of the bounding box.
+  // So we adjust y:
+  const boundingBoxTop = startY - (rootHeight - NODE_HEIGHT) / 2;
 
-export const addSiblingNode = (data: MindMapData, referenceId: string): MindMapData => {
-  const refNode = data.nodes[referenceId];
-  if (!refNode.parentId) return data; // Cannot add sibling to root via this method
+  assignPositions(root, startX, boundingBoxTop, rootHeight);
 
-  const parent = data.nodes[refNode.parentId];
-  const newNode = createNode('分支主题');
-  newNode.parentId = parent.id;
-
-  const children = [...parent.children];
-  const index = children.indexOf(referenceId);
-  children.splice(index + 1, 0, newNode.id);
-
-  const newNodes = { ...data.nodes };
-  newNodes[newNode.id] = newNode;
-  newNodes[parent.id] = { ...parent, children };
-
-  return { ...data, nodes: newNodes };
-};
-
-export const deleteNode = (data: MindMapData, id: string): MindMapData => {
-  if (id === data.rootId) return data; // Cannot delete root
-  
-  const nodeToDelete = data.nodes[id];
-  if (!nodeToDelete || !nodeToDelete.parentId) return data;
-
-  const parent = data.nodes[nodeToDelete.parentId];
-  const newNodes = { ...data.nodes };
-  
-  // Recursive delete helper
-  const removeRecursively = (nId: string) => {
-    const n = newNodes[nId];
-    if (n && n.children) {
-      n.children.forEach(removeRecursively);
-    }
-    delete newNodes[nId];
-  };
-
-  // Remove from parent's children list
-  newNodes[parent.id] = {
-    ...parent,
-    children: parent.children.filter(cid => cid !== id)
-  };
-
-  removeRecursively(id);
-
-  return { ...data, nodes: newNodes };
-};
-
-export const toggleCollapse = (data: MindMapData, id: string): MindMapData => {
-  const node = data.nodes[id];
-  return {
-    ...data,
-    nodes: {
-      ...data.nodes,
-      [id]: { ...node, isCollapsed: !node.isCollapsed }
-    }
-  };
-};
-
-export const moveNode = (data: MindMapData, dragId: string, dropId: string): MindMapData => {
-  if (dragId === dropId || dragId === data.rootId) return data;
-  
-  // Check circular dependency: Is dropId inside dragId's subtree?
-  let curr = data.nodes[dropId];
-  while (curr.parentId) {
-    if (curr.parentId === dragId) return data; // Cannot drop into own child
-    curr = data.nodes[curr.parentId];
-  }
-
-  const dragNode = data.nodes[dragId];
-  const oldParent = data.nodes[dragNode.parentId!];
-  const newParent = data.nodes[dropId];
-
-  const newNodes = { ...data.nodes };
-
-  // Remove from old parent
-  newNodes[oldParent.id] = {
-    ...oldParent,
-    children: oldParent.children.filter(c => c !== dragId)
-  };
-
-  // Add to new parent
-  newNodes[newParent.id] = {
-    ...newParent,
-    children: [...newParent.children, dragId],
-    isCollapsed: false // Ensure dropped target is expanded
-  };
-
-  // Update node parent pointer
-  newNodes[dragId] = {
-    ...dragNode,
-    parentId: dropId
-  };
-
-  return { ...data, nodes: newNodes };
+  return updates;
 };
