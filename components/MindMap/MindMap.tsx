@@ -1,170 +1,291 @@
-import React, { useCallback, useEffect, useMemo } from 'react';
-import ReactFlow, {
-  Node,
-  Edge,
-  addEdge,
-  Connection,
-  useNodesState,
-  useEdgesState,
-  Controls,
-  Background,
-  Panel,
-  ReactFlowProvider,
-} from 'reactflow';
-import MindMapNode from './MindMapNode';
-import { getLayoutedElements, LayoutType } from './layoutUtils';
-import { GitBranch, Network, ArrowDown, Layout, Palette } from 'lucide-react';
 
-interface MindMapData {
-  nodes: Node[];
-  edges: Edge[];
-  layout: LayoutType;
-  theme: 'default' | 'colorful' | 'dark' | 'minimal';
-}
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { MindMapData, MindMapNodeData } from '../../types';
+import { 
+  calculateMindMapLayout, 
+  LayoutNode, 
+  addChildNode, 
+  addSiblingNode, 
+  deleteNode, 
+  toggleCollapse,
+  moveNode,
+  createNode
+} from './layoutUtils';
+import { ChevronRight, GripVertical, Plus } from 'lucide-react';
 
 interface MindMapProps {
-  initialData?: Partial<MindMapData>;
-  onChange: (data: Partial<MindMapData>) => void;
-  isEditable: boolean;
+  initialData?: MindMapData;
+  onChange?: (data: MindMapData) => void;
+  isEditable?: boolean;
 }
 
-const nodeTypes = {
-  mindMap: MindMapNode,
+const DEFAULT_DATA: MindMapData = {
+  rootId: 'root',
+  nodes: {
+    'root': { id: 'root', text: '中心主题', parentId: null, children: ['n1', 'n2'] },
+    'n1': { id: 'n1', text: '分支主题 1', parentId: 'root', children: [] },
+    'n2': { id: 'n2', text: '分支主题 2', parentId: 'root', children: ['n2-1'] },
+    'n2-1': { id: 'n2-1', text: '子节点 A', parentId: 'n2', children: [] },
+  }
 };
 
-const DEFAULT_NODES: Node[] = [
-  { id: 'root', type: 'mindMap', data: { label: '中心主题', depth: 0 }, position: { x: 0, y: 0 } },
-  { id: '1', type: 'mindMap', data: { label: '分支 1', depth: 1 }, position: { x: 0, y: 0 } },
-  { id: '2', type: 'mindMap', data: { label: '分支 2', depth: 1 }, position: { x: 0, y: 0 } },
-];
+export const MindMap: React.FC<MindMapProps> = ({ initialData, onChange, isEditable = true }) => {
+  const [data, setData] = useState<MindMapData>(initialData && initialData.rootId ? initialData : DEFAULT_DATA);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [dragTargetId, setDragTargetId] = useState<string | null>(null);
+  
+  // Calculate layout whenever data changes
+  const layout = useMemo(() => calculateMindMapLayout(data), [data]);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-const DEFAULT_EDGES: Edge[] = [
-  { id: 'e1', source: 'root', target: '1' },
-  { id: 'e2', source: 'root', target: '2' },
-];
-
-const MindMapContent: React.FC<MindMapProps> = ({ initialData, onChange, isEditable }) => {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialData?.nodes || DEFAULT_NODES);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialData?.edges || DEFAULT_EDGES);
-  const [layout, setLayout] = React.useState<LayoutType>(initialData?.layout || 'tree-right');
-  const [theme, setTheme] = React.useState<MindMapData['theme']>(initialData?.theme || 'default');
-
-  // Handle Label Changes from custom node
-  const onLabelChange = useCallback((id: string, newLabel: string) => {
-    setNodes((nds) =>
-      nds.map((node) => {
-        if (node.id === id) {
-          return { ...node, data: { ...node.data, label: newLabel } };
-        }
-        return node;
-      })
-    );
-  }, [setNodes]);
-
-  // Inject handlers into nodes
+  // Sync back to parent
   useEffect(() => {
-    setNodes((nds) => 
-        nds.map(n => ({
-            ...n,
-            data: { ...n.data, theme, onLabelChange }
-        }))
-    );
-  }, [theme, setNodes, onLabelChange]);
+    if (onChange) onChange(data);
+  }, [data, onChange]);
 
-  // Auto Layout effect
-  useEffect(() => {
-    const layouted = getLayoutedElements(nodes, edges, layout);
-    // We only update positions to avoid resetting other state
-    setNodes((nds) => 
-        nds.map(n => {
-            const layoutedNode = layouted.nodes.find(ln => ln.id === n.id);
-            return layoutedNode ? { ...n, position: layoutedNode.position, sourcePosition: layoutedNode.sourcePosition, targetPosition: layoutedNode.targetPosition } : n;
-        })
-    );
-  }, [layout, nodes.length, edges.length]); // Re-run when structure changes
+  // --- Actions ---
 
-  // Sync up to parent
-  useEffect(() => {
-    // Debounce this in a real app
-    const timeout = setTimeout(() => {
-        // Strip functions from data before saving
-        const cleanNodes = nodes.map(({data, ...rest}) => ({
-            ...rest,
-            data: { label: data.label, depth: data.depth }
-        }));
-        onChange({ nodes: cleanNodes, edges, layout, theme });
-    }, 500);
-    return () => clearTimeout(timeout);
-  }, [nodes, edges, layout, theme]);
+  const handleSelect = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setSelectedId(id);
+    setEditingId(null);
+  };
 
-  const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
-    [setEdges]
-  );
+  const handleEdit = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    setSelectedId(id);
+    setEditingId(id);
+  };
 
-  const addNode = () => {
-    const newId = `n-${Date.now()}`;
-    const parentId = nodes.length > 0 ? nodes[0].id : null;
-    
-    const newNode: Node = {
-      id: newId,
-      type: 'mindMap',
-      data: { label: '新节点', depth: 1 },
-      position: { x: 0, y: 0 }, // Layout will fix this
-    };
+  const handleUpdateText = (id: string, newText: string) => {
+    setData(prev => ({
+      ...prev,
+      nodes: {
+        ...prev.nodes,
+        [id]: { ...prev.nodes[id], text: newText }
+      }
+    }));
+  };
 
-    setNodes((nds) => [...nds, newNode]);
-    if (parentId) {
-      setEdges((eds) => [...eds, { id: `e-${newId}`, source: parentId, target: newId }]);
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!selectedId || editingId || !isEditable) return;
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const newData = addChildNode(data, selectedId);
+      setData(newData);
+      // Select the newly created child (last child of selected)
+      const updatedParent = newData.nodes[selectedId];
+      if (updatedParent.children.length > 0) {
+          const newChildId = updatedParent.children[updatedParent.children.length - 1];
+          setSelectedId(newChildId);
+          setEditingId(newChildId);
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (selectedId === data.rootId) return; // Cannot add sibling to root
+      const newData = addSiblingNode(data, selectedId);
+      setData(newData);
+       // Select new sibling (next to current)
+      const parentId = data.nodes[selectedId].parentId!;
+      const updatedParent = newData.nodes[parentId];
+      const idx = updatedParent.children.indexOf(selectedId);
+      if (idx !== -1 && idx + 1 < updatedParent.children.length) {
+          const newSiblingId = updatedParent.children[idx+1];
+          setSelectedId(newSiblingId);
+          setEditingId(newSiblingId);
+      }
+    } else if (e.key === 'Backspace' || e.key === 'Delete') {
+      if (selectedId === data.rootId) return;
+      const parentId = data.nodes[selectedId].parentId!;
+      const newData = deleteNode(data, selectedId);
+      setData(newData);
+      setSelectedId(parentId);
+    } else if (e.key === 'ArrowLeft') {
+       e.preventDefault();
+       const node = data.nodes[selectedId];
+       if (node.parentId) setSelectedId(node.parentId);
+    } else if (e.key === 'ArrowRight') {
+       e.preventDefault();
+       const node = data.nodes[selectedId];
+       if (node.children.length > 0 && !node.isCollapsed) setSelectedId(node.children[0]);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+       e.preventDefault();
+       const node = data.nodes[selectedId];
+       if (!node.parentId) return;
+       const parent = data.nodes[node.parentId];
+       const idx = parent.children.indexOf(selectedId);
+       if (e.key === 'ArrowDown' && idx < parent.children.length - 1) setSelectedId(parent.children[idx + 1]);
+       if (e.key === 'ArrowUp' && idx > 0) setSelectedId(parent.children[idx - 1]);
+    } else if (e.key === 'F2') {
+       setEditingId(selectedId);
     }
+  }, [data, selectedId, editingId, isEditable]);
+
+  // --- Drag & Drop ---
+
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+      if (id === data.rootId) {
+          e.preventDefault(); // Root not draggable
+          return;
+      }
+      e.dataTransfer.setData('nodeId', id);
+      e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragTargetId(id);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const dragId = e.dataTransfer.getData('nodeId');
+      if (dragId && dragId !== targetId) {
+          setData(moveNode(data, dragId, targetId));
+      }
+      setDragTargetId(null);
+  };
+
+  // --- Render Helpers ---
+
+  const renderBezier = (start: LayoutNode, end: LayoutNode) => {
+    const startX = start.x + start.width;
+    const startY = start.y + start.height / 2;
+    const endX = end.x;
+    const endY = end.y + end.height / 2;
+    
+    // Control points for nice curve
+    const c1x = startX + (endX - startX) / 2;
+    const c1y = startY;
+    const c2x = endX - (endX - startX) / 2;
+    const c2y = endY;
+
+    return (
+      <path
+        key={`${start.id}-${end.id}`}
+        d={`M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`}
+        fill="none"
+        stroke={start.color}
+        strokeWidth="2"
+        strokeOpacity="0.4"
+      />
+    );
   };
 
   return (
-    <div className="w-full h-full bg-white rounded-lg">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        nodeTypes={nodeTypes}
-        fitView
-        panOnScroll={isEditable}
-        zoomOnScroll={isEditable}
-        panOnDrag={isEditable}
-        nodesDraggable={isEditable}
-        proOptions={{ hideAttribution: true }}
+    <div 
+        ref={containerRef}
+        className="relative w-full h-full min-w-[300px] min-h-[200px] bg-white select-none overflow-auto custom-scrollbar outline-none"
+        tabIndex={0}
+        onKeyDown={handleKeyDown}
+        onClick={() => { setSelectedId(null); setEditingId(null); }} // Deselect on background click
+    >
+      {/* SVG Layer for Edges */}
+      <svg 
+        className="absolute top-0 left-0 w-full h-full pointer-events-none"
+        style={{ width: Math.max(layout.width, 1000), height: Math.max(layout.height, 1000) }}
       >
-        <Background color="#f1f5f9" gap={16} />
-        {isEditable && (
-            <>
-                <Controls showInteractive={false} className="bg-white border border-slate-200 shadow-sm" />
-                <Panel position="top-right" className="flex flex-col gap-2 bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
-                    <div className="flex gap-1">
-                        <button onClick={() => setLayout('tree-right')} className={`p-1.5 rounded ${layout === 'tree-right' ? 'bg-blue-100 text-blue-600' : 'hover:bg-slate-100'}`} title="向右展开"><GitBranch size={16} className="rotate-90" /></button>
-                        <button onClick={() => setLayout('tree-down')} className={`p-1.5 rounded ${layout === 'tree-down' ? 'bg-blue-100 text-blue-600' : 'hover:bg-slate-100'}`} title="向下展开"><ArrowDown size={16} /></button>
-                        <button onClick={() => setLayout('radial')} className={`p-1.5 rounded ${layout === 'radial' ? 'bg-blue-100 text-blue-600' : 'hover:bg-slate-100'}`} title="发散布局"><Network size={16} /></button>
-                        <button onClick={() => setLayout('org-chart')} className={`p-1.5 rounded ${layout === 'org-chart' ? 'bg-blue-100 text-blue-600' : 'hover:bg-slate-100'}`} title="组织架构"><Layout size={16} /></button>
-                    </div>
-                    <div className="h-px bg-slate-100" />
-                    <div className="flex gap-1">
-                        <button onClick={() => setTheme('default')} className={`w-5 h-5 rounded-full border border-slate-200 bg-white ${theme==='default'?'ring-2 ring-blue-500':''}`} title="默认"></button>
-                        <button onClick={() => setTheme('colorful')} className={`w-5 h-5 rounded-full border border-slate-200 bg-gradient-to-br from-blue-100 to-purple-100 ${theme==='colorful'?'ring-2 ring-blue-500':''}`} title="多彩"></button>
-                        <button onClick={() => setTheme('dark')} className={`w-5 h-5 rounded-full border border-slate-600 bg-slate-800 ${theme==='dark'?'ring-2 ring-blue-500':''}`} title="深色"></button>
-                        <button onClick={() => setTheme('minimal')} className={`w-5 h-5 rounded-full border border-slate-200 bg-slate-50 flex items-center justify-center text-[8px] text-slate-400 ${theme==='minimal'?'ring-2 ring-blue-500':''}`} title="极简">M</button>
-                    </div>
-                    <div className="h-px bg-slate-100" />
-                    <button onClick={addNode} className="text-xs bg-blue-600 text-white px-2 py-1.5 rounded hover:bg-blue-700 transition-colors">添加节点</button>
-                </Panel>
-            </>
-        )}
-      </ReactFlow>
+        {layout.nodes.map(node => {
+           const childIds = data.nodes[node.id].children;
+           // If collapsed, don't draw edges to children (layout engine won't return children coordinates anyway, but safe check)
+           if (data.nodes[node.id].isCollapsed) return null;
+
+           return childIds.map(childId => {
+             const childNode = layout.nodes.find(n => n.id === childId);
+             if (childNode) return renderBezier(node, childNode);
+             return null;
+           });
+        })}
+      </svg>
+
+      {/* Nodes Layer */}
+      <div 
+        className="absolute top-0 left-0"
+        style={{ width: Math.max(layout.width, 1000), height: Math.max(layout.height, 1000) }}
+      >
+        {layout.nodes.map(node => {
+           const isSelected = node.id === selectedId;
+           const isEditing = node.id === editingId;
+           const isRoot = node.depth === 0;
+           const isDragTarget = node.id === dragTargetId;
+           const hasChildren = data.nodes[node.id].children.length > 0;
+           const isCollapsed = data.nodes[node.id].isCollapsed;
+
+           return (
+             <div
+                key={node.id}
+                draggable={isEditable && !isRoot && !isEditing}
+                onDragStart={(e) => handleDragStart(e, node.id)}
+                onDragOver={(e) => handleDragOver(e, node.id)}
+                onDragLeave={() => setDragTargetId(null)}
+                onDrop={(e) => handleDrop(e, node.id)}
+                className={`absolute transition-all duration-200 group`}
+                style={{
+                    left: node.x,
+                    top: node.y,
+                    width: node.width,
+                    height: node.height,
+                }}
+             >
+                <div 
+                    onClick={(e) => handleSelect(e, node.id)}
+                    onDoubleClick={(e) => isEditable && handleEdit(e, node.id)}
+                    className={`
+                        relative w-full h-full flex items-center justify-center px-4 rounded-lg border-2 shadow-sm
+                        transition-colors cursor-pointer
+                        ${isRoot ? 'text-white font-bold text-lg' : 'text-slate-800 text-sm'}
+                        ${isSelected ? 'ring-2 ring-blue-400 shadow-md' : 'border-slate-200'}
+                        ${isDragTarget ? 'ring-2 ring-green-500 bg-green-50' : ''}
+                    `}
+                    style={{
+                        backgroundColor: isRoot ? node.color : '#fff',
+                        borderColor: isRoot ? node.color : (isSelected ? node.color : '#e2e8f0'),
+                        borderLeftWidth: isRoot ? 2 : 4,
+                        borderLeftColor: node.color
+                    }}
+                >
+                    {isEditing ? (
+                        <input
+                            autoFocus
+                            className={`w-full bg-transparent outline-none text-center ${isRoot ? 'text-white' : 'text-slate-800'}`}
+                            value={data.nodes[node.id].text}
+                            onChange={(e) => handleUpdateText(node.id, e.target.value)}
+                            onBlur={() => setEditingId(null)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    setEditingId(null);
+                                    // Refocus container to keep keyboard nav working
+                                    containerRef.current?.focus(); 
+                                }
+                                e.stopPropagation(); // Stop bubbling to main container
+                            }}
+                        />
+                    ) : (
+                        <span className="truncate w-full text-center select-none">{data.nodes[node.id].text}</span>
+                    )}
+
+                    {/* Expand/Collapse Button */}
+                    {hasChildren && !isRoot && (
+                        <button
+                            onClick={(e) => { e.stopPropagation(); setData(toggleCollapse(data, node.id)); }}
+                            className="absolute -right-3 top-1/2 -translate-y-1/2 w-5 h-5 bg-white border border-slate-300 rounded-full flex items-center justify-center hover:bg-slate-50 hover:border-blue-400 z-10"
+                        >
+                            {isCollapsed ? (
+                                <span className="text-[10px] font-bold text-slate-500">{data.nodes[node.id].children.length}</span>
+                            ) : (
+                                <div className="w-1.5 h-1.5 bg-slate-400 rounded-full" />
+                            )}
+                        </button>
+                    )}
+                </div>
+             </div>
+           );
+        })}
+      </div>
     </div>
   );
 };
-
-export const MindMap = (props: MindMapProps) => (
-    <ReactFlowProvider>
-        <MindMapContent {...props} />
-    </ReactFlowProvider>
-);

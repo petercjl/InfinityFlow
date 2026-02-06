@@ -1,6 +1,22 @@
 
 export type ItemType = 'note' | 'text' | 'image' | 'video' | 'shape' | 'mindmap-node' | 'report' | 'html' | 'image-generator' | 'video-generator' | 'mindmap';
 
+// Internal MindMap Node Structure
+export interface MindMapNodeData {
+  id: string;
+  text: string;
+  parentId: string | null;
+  children: string[]; // IDs of children
+  isCollapsed?: boolean;
+  order?: number; // For manual ordering among siblings
+}
+
+// The full data structure stored in CanvasItem.content (as stringified JSON)
+export interface MindMapData {
+  rootId: string;
+  nodes: Record<string, MindMapNodeData>;
+}
+
 export interface CanvasItem {
   id: string;
   type: ItemType;
@@ -8,7 +24,7 @@ export interface CanvasItem {
   y: number;
   width: number;
   height: number;
-  content?: string; // Text content, Image/Video URL, or HTML string
+  content?: string; // Text content, Image/Video URL, HTML string, or JSON for MindMap
   color?: string;
   meta?: {
     fontSize?: number;
