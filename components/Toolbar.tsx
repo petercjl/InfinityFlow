@@ -5,7 +5,7 @@ interface ToolbarProps {
   onAddText: () => void;
   onAddNote: () => void;
   onAddShape: () => void;
-  onAddMindMap: () => void;
+  onAddMindMapNode: () => void;
   onAddImageGen: () => void;
   onAddVideoGen: () => void;
   setModeSelect: () => void; // Reset to selection mode
@@ -16,7 +16,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onAddText,
   onAddNote, 
   onAddShape,
-  onAddMindMap,
+  onAddMindMapNode,
   onAddImageGen,
   onAddVideoGen, 
   setModeSelect,
@@ -49,7 +49,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <button className={btnClass(false)} onClick={onAddShape} title="添加形状">
           <Square size={20} />
         </button>
-        <button className={btnClass(false)} onClick={onAddMindMap} title="添加思维导图">
+        <button className={btnClass(false)} onClick={onAddMindMapNode} title="添加脑图节点">
           <GitBranch size={20} />
         </button>
 

@@ -1,5 +1,5 @@
 
-export type ItemType = 'note' | 'text' | 'image' | 'video' | 'shape' | 'mindmap' | 'report' | 'html' | 'image-generator' | 'video-generator';
+export type ItemType = 'note' | 'text' | 'image' | 'video' | 'shape' | 'mindmap-node' | 'report' | 'html' | 'image-generator' | 'video-generator' | 'mindmap';
 
 export interface CanvasItem {
   id: string;
@@ -15,8 +15,23 @@ export interface CanvasItem {
     fontFamily?: string;
     fontWeight?: string;
     backgroundColor?: string;
+    depth?: number; // For mindmap
+    theme?: string; // For mindmap
     [key: string]: any; // For extra data like original prompt, analysis source, etc.
   }; 
+}
+
+export interface CanvasEdge {
+  id: string;
+  source: string;  // Source node ID
+  target: string;  // Target node ID
+  type?: 'default' | 'smoothstep' | 'straight' | 'step';
+  animated?: boolean;
+  style?: {
+    stroke?: string;
+    strokeWidth?: number;
+  };
+  label?: string;
 }
 
 export type FileCategory = 
@@ -78,6 +93,7 @@ export interface Board {
   workspace: WorkspaceType;
   folderId?: string | null; // New: Belong to a folder
   items?: CanvasItem[]; 
+  edges?: CanvasEdge[]; // New: Connection edges
   thumbnailColor?: string;
 }
 

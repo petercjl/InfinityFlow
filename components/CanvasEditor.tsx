@@ -1,10 +1,75 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { CanvasItem, ViewTransform, AgentMode, ProjectFile, Board } from '../types';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import ReactFlow, {
+  Node,
+  Edge,
+  useNodesState,
+  useEdgesState,
+  addEdge,
+  Connection,
+  Controls,
+  Background,
+  MiniMap,
+  ReactFlowProvider,
+  NodeTypes,
+  ReactFlowInstance,
+  Panel
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+
+import { CanvasItem, ProjectFile, Board, CanvasEdge } from '../types';
 import { Toolbar } from './Toolbar';
-import { CanvasItem as CanvasItemComponent } from './CanvasItem';
 import { RightSidebar } from './RightSidebar';
-import { ChevronLeft, ChevronRight, Edit2, Cloud, Check, Loader2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Check, Loader2, Cloud } from 'lucide-react';
 import { saveBoardItems, getBoardItems } from '../services/geminiService';
+
+// Import Custom Nodes
+import NoteNode from './nodes/NoteNode';
+import TextNode from './nodes/TextNode';
+import MindMapNodeItem from './nodes/MindMapNodeItem';
+import GeneralNode from './nodes/GeneralNode';
+
+const nodeTypes: NodeTypes = {
+  'note': NoteNode,
+  'text': TextNode,
+  'mindmap-node': MindMapNodeItem,
+  'general': GeneralNode
+};
+
+// --- Helpers to convert between CanvasItem and ReactFlow Node ---
+
+const itemToNode = (item: CanvasItem): Node => {
+    const isSpecial = ['note', 'text', 'mindmap-node'].includes(item.type);
+    return {
+        id: item.id,
+        type: isSpecial ? item.type : 'general',
+        position: { x: item.x, y: item.y },
+        style: { width: item.width, height: item.height }, // ReactFlow uses style for dimensions usually
+        data: {
+            content: item.content,
+            color: item.color,
+            meta: item.meta,
+            itemType: item.type, // Store original type for GeneralNode
+            // We'll inject update handlers in the component render
+        },
+    };
+};
+
+const nodeToItem = (node: Node): CanvasItem => {
+    // Determine type: if it's 'general', check data.itemType
+    const type = node.type === 'general' ? (node.data.itemType || 'shape') : (node.type as CanvasItem['type']);
+    
+    return {
+        id: node.id,
+        type: type,
+        x: node.position.x,
+        y: node.position.y,
+        width: node.style?.width ? Number(node.style.width) : (node.width || 200),
+        height: node.style?.height ? Number(node.style.height) : (node.height || 200),
+        content: node.data.content,
+        color: node.data.color,
+        meta: node.data.meta,
+    };
+};
 
 // Initial Mock Files
 const INITIAL_FILES: ProjectFile[] = [
@@ -32,475 +97,285 @@ interface CanvasEditorProps {
     onRenameBoard: (newName: string) => void;
 }
 
-export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoard }) => {
-  // --- State ---
-  const [items, setItems] = useState<CanvasItem[]>(board.items || []);
-  const [view, setView] = useState<ViewTransform>({ x: 0, y: 0, scale: 1 });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [files, setFiles] = useState<ProjectFile[]>(INITIAL_FILES);
-  const [isLoading, setIsLoading] = useState(true);
-  
-  // Save Status State
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ignoreNextSaveRef = useRef(true); // Ignore initial render save
-  
-  // Header Title Editing State
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [tempTitle, setTempTitle] = useState(board.title);
+const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoard }) => {
+    // ReactFlow State
+    const [nodes, setNodes, onNodesChange] = useNodesState([]);
+    const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+    const [rfInstance, setRfInstance] = useState<ReactFlowInstance | null>(null);
 
-  // Sync tempTitle if board prop changes externally
-  useEffect(() => {
-    setTempTitle(board.title);
-  }, [board.title]);
-  
-  // Context for Agent (Images selected on canvas)
-  const [contextImages, setContextImages] = useState<string[]>([]);
+    // Sidebar & UI State
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [files, setFiles] = useState<ProjectFile[]>(INITIAL_FILES);
+    const [contextImages, setContextImages] = useState<string[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
 
-  // Dragging State
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef<{ x: number; y: number } | null>(null);
-  const isPanningRef = useRef(false); // Distinguish between panning and item dragging
-  const canvasRef = useRef<HTMLDivElement>(null);
+    // Save Status
+    const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
+    const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const ignoreNextSaveRef = useRef(true);
 
-  // --- Auto Save Logic ---
+    // Header Title
+    const [isEditingTitle, setIsEditingTitle] = useState(false);
+    const [tempTitle, setTempTitle] = useState(board.title);
 
-  const performSave = async (currentItems: CanvasItem[]) => {
-      setSaveStatus('saving');
-      try {
-          await saveBoardItems(board.id, currentItems);
-          setSaveStatus('saved');
-      } catch (e) {
-          console.error('Auto-save failed', e);
-          setSaveStatus('unsaved'); // keep unsaved state on error
-      }
-  };
+    // Sync title
+    useEffect(() => { setTempTitle(board.title); }, [board.title]);
 
-  // Load items from backend on mount
-  useEffect(() => {
-      let isMounted = true;
-      const loadItems = async () => {
-          setIsLoading(true);
-          const backendItems = await getBoardItems(board.id);
-          
-          if (isMounted) {
-              if (backendItems && backendItems.length > 0) {
-                  ignoreNextSaveRef.current = true; // Prevent triggering auto-save
-                  setItems(backendItems);
-              }
-              setIsLoading(false);
-              setSaveStatus('saved');
-          }
-      };
-      loadItems();
-      return () => { isMounted = false; };
-  }, [board.id]);
-
-  // Debounce Effect: Trigger save 1.5s after items change
-  useEffect(() => {
-      // Check if we should ignore this change (initial load)
-      if (ignoreNextSaveRef.current) {
-          ignoreNextSaveRef.current = false;
-          return;
-      }
-      
-      if (saveTimeoutRef.current) {
-          clearTimeout(saveTimeoutRef.current);
-      }
-      
-      setSaveStatus('unsaved');
-
-      saveTimeoutRef.current = setTimeout(() => {
-          performSave(items);
-      }, 1500);
-
-      return () => {
-          if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      };
-  }, [items, board.id]);
-
-  // Handle Before Unload (Attempt to save when closing tab)
-  useEffect(() => {
-      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-          if (saveStatus === 'unsaved' || saveStatus === 'saving') {
-              // We rely on performSave logic or direct call. 
-              // Note: fetch with keepalive is used in service.
-              saveBoardItems(board.id, items);
-          }
-      };
-      window.addEventListener('beforeunload', handleBeforeUnload);
-      return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [items, board.id, saveStatus]);
-
-  // Handle Back Button with Immediate Save
-  const handleBackClick = async () => {
-      if (saveTimeoutRef.current) {
-          clearTimeout(saveTimeoutRef.current);
-      }
-      // If currently saving or unsaved, force a save before leaving
-      if (saveStatus !== 'saved') {
-          setSaveStatus('saving');
-          await saveBoardItems(board.id, items);
-      }
-      onBack();
-  };
-
-
-  // --- Helpers ---
-  
-  // Find a position that doesn't overlap with existing items
-  const findSafePosition = (width: number, height: number, startX: number, startY: number): { x: number, y: number } => {
-    const PADDING = 20;
-    let attemptX = startX;
-    let attemptY = startY;
-    let hasCollision = true;
-    let attempts = 0;
-    const maxAttempts = 100; // Prevent infinite loop
-
-    while (hasCollision && attempts < maxAttempts) {
-        hasCollision = false;
-        
-        for (const item of items) {
-            if (
-                attemptX < item.x + item.width + PADDING &&
-                attemptX + width + PADDING > item.x &&
-                attemptY < item.y + item.height + PADDING &&
-                attemptY + height + PADDING > item.y
-            ) {
-                hasCollision = true;
-                break;
-            }
-        }
-
-        if (hasCollision) {
-            attemptX += 50; 
-            if (attemptX > startX + 500) {
-                attemptX = startX - 200; 
-                attemptY += 50; 
-            }
-            attempts++;
-        }
-    }
-
-    return { x: attemptX, y: attemptY };
-  };
-
-  const getCenterCoords = () => {
-    return {
-        x: -view.x / view.scale + window.innerWidth / 2 / view.scale - 150,
-        y: -view.y / view.scale + window.innerHeight / 2 / view.scale - 150
-    };
-  };
-
-  const addItems = (newItemsData: { type: CanvasItem['type'], content: string }[]) => {
-    if (newItemsData.length === 0) return;
-
-    const center = getCenterCoords();
-    const GAP = 40; 
-    
-    // Determine dimensions based on type
-    const getTypeDims = (type: string) => {
-        if (type === 'text') return { w: 200, h: 100 };
-        if (type === 'note') return { w: 200, h: 200 };
-        if (type === 'mindmap') return { w: 600, h: 400 };
-        if (type === 'html') return { w: 500, h: 600 };
-        if (type === 'image-generator') return { w: 400, h: 480 }; // Includes space for control panel
-        if (type === 'video-generator') return { w: 480, h: 400 };
-        return { w: 300, h: 300 };
-    };
-
-    const firstDims = getTypeDims(newItemsData[0].type);
-    const startPos = findSafePosition(firstDims.w, firstDims.h, center.x, center.y);
-    
-    const newCanvasItems: CanvasItem[] = [];
-    let currentX = startPos.x;
-    let currentY = startPos.y;
-
-    newItemsData.forEach((data, index) => {
-        const dims = getTypeDims(data.type);
-
-        const newItem: CanvasItem = {
-            id: Date.now().toString() + Math.random().toString().slice(2, 5) + index,
-            type: data.type,
-            x: currentX,
-            y: currentY,
-            width: dims.w,
-            height: dims.h,
-            content: data.content,
-            color: data.type === 'note' ? '#fef3c7' : '#ffffff', // Default color for note
-            meta: { fontSize: 14, fontFamily: 'sans-serif' }
-        };
-        newCanvasItems.push(newItem);
-        currentX += dims.w + GAP;
-    });
-    
-    setItems(prev => [...prev, ...newCanvasItems]);
-    // Select the last added item
-    if(newCanvasItems.length > 0) {
-        setSelectedId(newCanvasItems[newCanvasItems.length-1].id);
-    }
-  };
-
-  const handleUpdateItem = (itemId: string, updates: Partial<CanvasItem>) => {
-      setItems(prev => prev.map(item => 
-          item.id === itemId ? { ...item, ...updates } : item
-      ));
-  };
-
-  const handleDeleteItem = (itemId: string) => {
-      setItems(prev => prev.filter(item => item.id !== itemId));
-      setSelectedId(null);
-  };
-
-  // --- Event Handlers ---
-
-  const handleRenameFile = (fileId: string, newName: string) => {
-      setFiles(prev => prev.map(f => f.id === fileId ? { ...f, name: newName } : f));
-  };
-
-  const handleSaveTitle = () => {
-      if (tempTitle.trim() && tempTitle !== board.title) {
-          onRenameBoard(tempTitle.trim());
-      } else {
-          setTempTitle(board.title); // Revert
-      }
-      setIsEditingTitle(false);
-  };
-
-  // Optimized: Only run when selectedId changes, NOT when items change (to avoid re-adding on drag)
-  useEffect(() => {
-    if (selectedId) {
-        const item = items.find(i => i.id === selectedId);
-        if (item && item.type === 'image' && item.content) {
-            setContextImages(prev => {
-                if (!prev.includes(item.content!)) {
-                    return [...prev, item.content!];
+    // Initial Load
+    useEffect(() => {
+        let isMounted = true;
+        const loadItems = async () => {
+            setIsLoading(true);
+            const backendItems = await getBoardItems(board.id);
+            if (isMounted) {
+                if (backendItems && backendItems.length > 0) {
+                    const loadedNodes = backendItems.map(itemToNode);
+                    setNodes(loadedNodes);
+                    // Edges: If backend supports edges, load them. For now assume empty or mock logic needed.
+                    // For this refactor, let's use board.edges if provided via props, else empty.
+                    if (board.edges) {
+                        setEdges(board.edges);
+                    }
+                    ignoreNextSaveRef.current = true;
                 }
-                return prev;
+                setIsLoading(false);
+                setSaveStatus('saved');
+            }
+        };
+        loadItems();
+        return () => { isMounted = false; };
+    }, [board.id, board.edges, setNodes, setEdges]);
+
+    // Inject Handlers into Nodes
+    // We update nodes whenever their data structure implies a need, OR we use the onNodesChange for position
+    // BUT for content change (textarea), we need to update node data.
+    const onNodeContentChange = useCallback((id: string, newContent: string) => {
+        setNodes((nds) => nds.map((node) => {
+            if (node.id === id) {
+                return { ...node, data: { ...node.data, content: newContent } };
+            }
+            return node;
+        }));
+    }, [setNodes]);
+
+    // Inject callbacks into node data whenever nodes change (to ensure handlers are fresh)
+    useEffect(() => {
+        setNodes((nds) => nds.map((node) => ({
+            ...node,
+            data: {
+                ...node.data,
+                onContentChange: (val: string) => onNodeContentChange(node.id, val)
+            }
+        })));
+    }, [onNodeContentChange, setNodes]);
+
+
+    // Auto Save
+    useEffect(() => {
+        if (ignoreNextSaveRef.current) {
+            ignoreNextSaveRef.current = false;
+            return;
+        }
+        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+        
+        setSaveStatus('unsaved');
+        saveTimeoutRef.current = setTimeout(() => {
+            setSaveStatus('saving');
+            const itemsToSave = nodes.map(nodeToItem);
+            saveBoardItems(board.id, itemsToSave).then(() => setSaveStatus('saved'));
+        }, 1500);
+
+        return () => { if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current); };
+    }, [nodes, edges, board.id]);
+
+    // Handlers
+    const onConnect = useCallback((params: Connection) => {
+        setEdges((eds) => addEdge({ ...params, type: 'smoothstep', animated: true }, eds));
+    }, [setEdges]);
+
+    const handleAddNode = (type: string, content: string = '', itemType?: string) => {
+        let x = 100, y = 100;
+        
+        if (rfInstance) {
+             const center = rfInstance.project({ 
+                x: window.innerWidth / 2 - 200, 
+                y: window.innerHeight / 2 
+            });
+            x = center.x + (Math.random() - 0.5) * 50;
+            y = center.y + (Math.random() - 0.5) * 50;
+        }
+
+        const newNode: Node = {
+            id: Date.now().toString(),
+            type: ['note', 'text', 'mindmap-node'].includes(type) ? type : 'general',
+            position: { x, y },
+            data: { 
+                content, 
+                itemType: itemType || type, // For GeneralNode
+                onContentChange: (val: string) => onNodeContentChange(newNode.id, val)
+            },
+            style: { 
+                width: type === 'note' ? 200 : type === 'mindmap-node' ? 150 : 300, 
+                height: type === 'note' ? 200 : type === 'mindmap-node' ? 50 : 300 
+            },
+        };
+
+        setNodes((nds) => nds.concat(newNode));
+    };
+
+    const handleRenameFile = (fileId: string, newName: string) => {
+        setFiles(prev => prev.map(f => f.id === fileId ? { ...f, name: newName } : f));
+    };
+
+    const handleSaveTitle = () => {
+        if (tempTitle.trim() && tempTitle !== board.title) {
+            onRenameBoard(tempTitle.trim());
+        } else {
+            setTempTitle(board.title);
+        }
+        setIsEditingTitle(false);
+    };
+
+    // Context Image Logic (Simple: last selected image node)
+    // We can use onSelectionChange provided by ReactFlow
+    const onSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Node[] }) => {
+        const imgNodes = selectedNodes.filter(n => n.type === 'general' && n.data.itemType === 'image');
+        if (imgNodes.length > 0) {
+            const urls = imgNodes.map(n => n.data.content).filter(Boolean);
+            setContextImages(prev => {
+                const newUrls = urls.filter(u => !prev.includes(u));
+                return [...prev, ...newUrls];
             });
         }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId]); 
+    }, []);
 
-  const handleRemoveContextImage = (imgUrl: string) => {
-      setContextImages(prev => prev.filter(img => img !== imgUrl));
-  };
-
-  // Native Wheel Event Listener
-  useEffect(() => {
-      const container = canvasRef.current;
-      if (!container) return;
-
-      const handleNativeWheel = (e: WheelEvent) => {
-          e.preventDefault(); 
-          if (e.ctrlKey || e.metaKey) {
-              const zoomIntensity = 0.002; 
-              const zoomFactor = -e.deltaY * zoomIntensity;
-              setView(prev => {
-                  const newScale = Math.min(Math.max(0.1, prev.scale + zoomFactor), 5);
-                  return { ...prev, scale: newScale };
-              });
-          } else {
-              setView(prev => ({ 
-                  ...prev, 
-                  x: prev.x - e.deltaX, 
-                  y: prev.y - e.deltaY 
-              }));
-          }
-      };
-      container.addEventListener('wheel', handleNativeWheel, { passive: false });
-      return () => container.removeEventListener('wheel', handleNativeWheel);
-  }, []); 
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return; 
-    
-    // If we are clicking on the canvas (background), deselect
-    // NOTE: CanvasItem stops propagation on its own pointer down events, so this only fires for background
-    dragStartRef.current = { x: e.clientX, y: e.clientY };
-    setIsDragging(true);
-    isPanningRef.current = true; 
-    setSelectedId(null); 
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging || !dragStartRef.current) return;
-    const rawDx = e.clientX - dragStartRef.current.x;
-    const rawDy = e.clientY - dragStartRef.current.y;
-
-    if (selectedId && !isPanningRef.current) {
-      const dx = rawDx / view.scale;
-      const dy = rawDy / view.scale;
-      setItems(prev => prev.map(item => item.id === selectedId ? { ...item, x: item.x + dx, y: item.y + dy } : item));
-    } else {
-      setView(prev => ({ ...prev, x: prev.x + rawDx, y: prev.y + rawDy }));
-    }
-    dragStartRef.current = { x: e.clientX, y: e.clientY };
-  };
-
-  const handlePointerUp = () => {
-    setIsDragging(false);
-    dragStartRef.current = null;
-    isPanningRef.current = false;
-  };
-
-  return (
-    <div className="w-full h-full relative bg-slate-100 overflow-hidden font-sans flex">
-      <div className="flex-1 relative h-full overflow-hidden">
-        
-        {/* Loading Overlay */}
-        {isLoading && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-100/50 backdrop-blur-sm">
-                <div className="flex flex-col items-center gap-3">
-                    <Loader2 className="animate-spin text-blue-600" size={32} />
-                    <p className="text-sm text-slate-500 font-medium">正在加载画板内容...</p>
-                </div>
-            </div>
-        )}
-
-        <div 
-            ref={canvasRef}
-            className={`w-full h-full touch-none ${isPanningRef.current ? 'cursor-grabbing' : 'cursor-grab'}`}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
-        >
-            <div 
-            style={{ 
-                transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
-                transformOrigin: '0 0',
-                width: '100%',
-                height: '100%'
-            }}
-            >
-                <div 
-                    className="absolute -top-[5000px] -left-[5000px] w-[10000px] h-[10000px] pointer-events-none opacity-20"
-                    style={{ backgroundImage: 'radial-gradient(circle, #94a3b8 1px, transparent 1px)', backgroundSize: '24px 24px' }}
-                />
-                {items.map(item => (
-                    <CanvasItemComponent 
-                    key={item.id} 
-                    item={item} 
-                    isSelected={selectedId === item.id}
-                    scale={view.scale}
-                    onUpdate={(updates) => handleUpdateItem(item.id, updates)}
-                    onDelete={() => handleDeleteItem(item.id)}
-                    onSelect={(e) => {
-                        e.stopPropagation(); 
-                        setSelectedId(item.id);
-                        dragStartRef.current = { x: e.clientX, y: e.clientY };
-                        setIsDragging(true);
-                        isPanningRef.current = false; 
-                    }}
-                    />
-                ))}
-            </div>
-        </div>
-
-        {/* Top Header */}
-        <div className="absolute top-4 left-4 right-4 h-14 pointer-events-none flex justify-between items-start z-30">
-            <div className="flex items-center gap-3 pointer-events-auto">
-                <button onClick={handleBackClick} className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg p-2 hover:bg-slate-50 text-slate-600">
-                    <ChevronLeft size={20} />
-                </button>
-                <div className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg px-4 py-2 flex items-center gap-3 min-w-[240px] max-w-md">
-                    <div className="bg-blue-600 w-8 h-8 rounded flex items-center justify-center text-white font-bold flex-shrink-0">IF</div>
-                    <div className="flex-1 min-w-0 flex flex-col justify-center">
-                        {isEditingTitle ? (
-                             <input 
-                                autoFocus
-                                className="w-full text-sm font-bold text-slate-800 bg-transparent border-b border-blue-500 outline-none p-0"
-                                value={tempTitle}
-                                onChange={e => setTempTitle(e.target.value)}
-                                onBlur={handleSaveTitle}
-                                onKeyDown={e => {
-                                    if (e.key === 'Enter') handleSaveTitle();
-                                    if (e.key === 'Escape') {
-                                        setTempTitle(board.title);
-                                        setIsEditingTitle(false);
-                                    }
-                                }}
-                            />
-                        ) : (
-                            <div className="flex items-center gap-2">
-                                <h1 
-                                    onClick={() => setIsEditingTitle(true)}
-                                    className="text-sm font-bold text-slate-800 cursor-text hover:bg-slate-100/50 rounded -ml-1 px-1 transition-colors truncate"
-                                    title="点击重命名"
-                                >
-                                    {board.title}
-                                </h1>
-                            </div>
-                        )}
-                        <p className="text-[10px] text-slate-500 leading-none mt-0.5">{board.workspace === 'team' ? '团队空间' : '个人空间'}</p>
+    return (
+        <div className="w-full h-full flex bg-slate-100 font-sans overflow-hidden">
+             
+             {/* Main Canvas Area */}
+             <div className="flex-1 relative h-full">
+                {isLoading && (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-100/50 backdrop-blur-sm">
+                        <Loader2 className="animate-spin text-blue-600" size={32} />
                     </div>
-                </div>
+                )}
 
-                {/* Save Status Indicator */}
-                <div className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg px-3 py-2 flex items-center gap-2 text-[10px] font-medium text-slate-500">
-                    {saveStatus === 'saving' && <><Loader2 size={12} className="animate-spin" /> 保存中...</>}
-                    {saveStatus === 'saved' && <><Check size={12} className="text-green-500" /> 已保存</>}
-                    {saveStatus === 'unsaved' && <><Cloud size={12} /> 未保存</>}
-                </div>
-            </div>
-             <div className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg px-2 py-2 pointer-events-auto flex items-center gap-2">
-                 <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-1.5 hover:bg-slate-100 rounded text-slate-600">
-                    {isSidebarOpen ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-                 </button>
-            </div>
+                <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onConnect={onConnect}
+                    nodeTypes={nodeTypes}
+                    onInit={setRfInstance}
+                    onSelectionChange={onSelectionChange}
+                    fitView
+                    snapToGrid
+                    snapGrid={[15, 15]}
+                    defaultEdgeOptions={{ type: 'smoothstep', animated: true, style: { strokeWidth: 2, stroke: '#94a3b8' } }}
+                    minZoom={0.1}
+                    maxZoom={4}
+                    proOptions={{ hideAttribution: true }}
+                    style={{ width: '100%', height: '100%' }}
+                >
+                    <Background color="#cbd5e1" gap={20} />
+                    <Controls showInteractive={false} className="bg-white border border-slate-200 shadow-sm" />
+                    <MiniMap className="border border-slate-200 shadow-sm rounded-lg overflow-hidden" zoomable pannable />
+                    
+                    {/* Header Panel inside ReactFlow to sit on top */}
+                    <Panel position="top-left" className="m-4 flex gap-3 pointer-events-auto">
+                        <button onClick={onBack} className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg p-2 hover:bg-slate-50 text-slate-600">
+                            <ChevronLeft size={20} />
+                        </button>
+                        <div className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg px-4 py-2 flex items-center gap-3 min-w-[240px] max-w-md">
+                            <div className="bg-blue-600 w-8 h-8 rounded flex items-center justify-center text-white font-bold flex-shrink-0">IF</div>
+                            <div className="flex-1 min-w-0 flex flex-col justify-center">
+                                {isEditingTitle ? (
+                                    <input 
+                                        autoFocus
+                                        className="w-full text-sm font-bold text-slate-800 bg-transparent border-b border-blue-500 outline-none p-0"
+                                        value={tempTitle}
+                                        onChange={e => setTempTitle(e.target.value)}
+                                        onBlur={handleSaveTitle}
+                                        onKeyDown={e => {
+                                            if (e.key === 'Enter') handleSaveTitle();
+                                            if (e.key === 'Escape') {
+                                                setTempTitle(board.title);
+                                                setIsEditingTitle(false);
+                                            }
+                                        }}
+                                    />
+                                ) : (
+                                    <h1 
+                                        onClick={() => setIsEditingTitle(true)}
+                                        className="text-sm font-bold text-slate-800 cursor-text hover:bg-slate-100/50 rounded -ml-1 px-1 transition-colors truncate"
+                                    >
+                                        {board.title}
+                                    </h1>
+                                )}
+                                <p className="text-[10px] text-slate-500 leading-none mt-0.5">{board.workspace === 'team' ? '团队空间' : '个人空间'}</p>
+                            </div>
+                        </div>
+                        <div className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg px-3 py-2 flex items-center gap-2 text-[10px] font-medium text-slate-500">
+                            {saveStatus === 'saving' && <><Loader2 size={12} className="animate-spin" /> 保存中...</>}
+                            {saveStatus === 'saved' && <><Check size={12} className="text-green-500" /> 已保存</>}
+                            {saveStatus === 'unsaved' && <><Cloud size={12} /> 未保存</>}
+                        </div>
+                    </Panel>
+
+                    <Panel position="top-right" className="m-4 pointer-events-auto">
+                        <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="bg-white/90 backdrop-blur border border-slate-200 shadow-sm rounded-lg p-2 hover:bg-slate-50 text-slate-600">
+                            {isSidebarOpen ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+                        </button>
+                    </Panel>
+                </ReactFlow>
+
+                <Toolbar 
+                    onAddText={() => handleAddNode('text', '')}
+                    onAddNote={() => handleAddNode('note', '')}
+                    onAddMindMapNode={() => handleAddNode('mindmap-node', '新节点')}
+                    onAddShape={() => handleAddNode('general', 'Shape', 'shape')}
+                    onAddImageGen={() => handleAddNode('general', '', 'image-generator')}
+                    onAddVideoGen={() => handleAddNode('general', '', 'video-generator')}
+                    setModeSelect={() => {}} // ReactFlow handles selection mode by default
+                    isSelectionMode={true} // Always selection mode in ReactFlow basically
+                />
+             </div>
+
+             {/* Right Sidebar */}
+             {isSidebarOpen && (
+                 <div className="w-96 h-full relative z-40">
+                     <RightSidebar 
+                        isOpen={isSidebarOpen}
+                        onClose={() => setIsSidebarOpen(false)}
+                        files={files}
+                        contextImages={contextImages}
+                        onRemoveContextImage={(img) => setContextImages(prev => prev.filter(i => i !== img))}
+                        onUploadFile={(cat, file) => setFiles(prev => [...prev, file])}
+                        onAddContentToCanvas={(items) => {
+                            items.forEach(i => handleAddNode('general', i.content, i.type));
+                        }}
+                        onSaveReport={(html) => {
+                            const newFile: ProjectFile = {
+                                id: Date.now().toString(),
+                                name: `分析报告_${new Date().toLocaleTimeString()}.html`,
+                                type: 'text',
+                                category: 'AnalysisReports',
+                                content: html,
+                                uploadDate: '刚刚'
+                            };
+                            setFiles(prev => [...prev, newFile]);
+                        }}
+                        onRenameFile={handleRenameFile}
+                     />
+                 </div>
+             )}
         </div>
+    );
+};
 
-        <Toolbar 
-            onAddText={() => addItems([{ type: 'text', content: '输入文本' }])}
-            onAddNote={() => addItems([{ type: 'note', content: '新想法' }])}
-            onAddMindMap={() => addItems([{ type: 'mindmap', content: '' }])}
-            onAddShape={() => addItems([{ type: 'shape', content: '' }])}
-            onAddImageGen={() => addItems([{ type: 'image-generator', content: '' }])}
-            onAddVideoGen={() => addItems([{ type: 'video-generator', content: '' }])}
-            setModeSelect={() => setSelectedId(null)}
-            isSelectionMode={selectedId === null}
-        />
-        
-        {/* Zoom Controls */}
-        <div className="absolute bottom-4 left-4 bg-white rounded-lg shadow-md border border-slate-200 p-1 flex gap-1 z-30">
-            <button className="p-2 hover:bg-slate-100 rounded text-slate-600" onClick={() => setView(v => ({...v, scale: Math.max(0.1, v.scale - 0.2)}))}>-</button>
-            <div className="px-2 py-2 text-sm text-slate-500 min-w-[3rem] text-center">{Math.round(view.scale * 100)}%</div>
-            <button className="p-2 hover:bg-slate-100 rounded text-slate-600" onClick={() => setView(v => ({...v, scale: Math.min(5, v.scale + 0.2)}))}>+</button>
-        </div>
-      </div>
-
-      {/* Right Sidebar Area */}
-      {isSidebarOpen && (
-          <div className="w-96 h-full relative z-40">
-              <RightSidebar 
-                isOpen={isSidebarOpen}
-                onClose={() => setIsSidebarOpen(false)}
-                files={files}
-                contextImages={contextImages}
-                onRemoveContextImage={handleRemoveContextImage}
-                onUploadFile={(cat, file) => setFiles(prev => [...prev, file])}
-                onAddContentToCanvas={(items) => {
-                    addItems(items);
-                }}
-                onSaveReport={(html) => {
-                    const newFile: ProjectFile = {
-                        id: Date.now().toString(),
-                        name: `分析报告_${new Date().toLocaleTimeString()}.html`,
-                        type: 'text',
-                        category: 'AnalysisReports',
-                        content: html,
-                        uploadDate: '刚刚'
-                    };
-                    setFiles(prev => [...prev, newFile]);
-                }}
-                onRenameFile={handleRenameFile}
-              />
-          </div>
-      )}
-
-    </div>
-  );
-}
+export const CanvasEditor = (props: CanvasEditorProps) => (
+    <ReactFlowProvider>
+        <EditorContent {...props} />
+    </ReactFlowProvider>
+);
