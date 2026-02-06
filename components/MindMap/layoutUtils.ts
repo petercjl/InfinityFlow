@@ -1,12 +1,12 @@
 
 import { Node, Edge } from 'reactflow';
 
-// Constants for layout
-const NODE_WIDTH_ROOT = 160;
-const NODE_WIDTH_CHILD = 120;
-const NODE_HEIGHT = 40;
-const HORIZONTAL_GAP = 80;
-const VERTICAL_GAP = 20;
+// Constants for layout - Adjusted for new visuals
+const NODE_WIDTH_ROOT = 180; // Slightly wider
+const NODE_WIDTH_CHILD = 140; // Wider child nodes
+const NODE_HEIGHT = 44; // Taller for padding
+const HORIZONTAL_GAP = 60; // Space between parent and child
+const VERTICAL_GAP = 16; // Tighter vertical packing
 
 interface LayoutNode {
   id: string;
@@ -34,17 +34,17 @@ export const recalculateMindMapLayout = (
 
     // Find outgoing edges from this node
     const childEdges = allEdges.filter(e => e.source === nodeId);
-    // Sort children by their Y position to maintain visual order stability if possible, 
-    // or by a specific 'order' meta property if we added one. 
-    // For now, we rely on the edge order or existing Y to keep stability.
+    
+    // Sort children by their Y position to maintain visual order stability
     const childNodes = childEdges
       .map(e => allNodes.find(n => n.id === e.target))
       .filter((n): n is Node => !!n)
       .sort((a, b) => a.position.y - b.position.y);
 
     const isRoot = node.type === 'mindmap-root';
-    const width = isRoot ? NODE_WIDTH_ROOT : NODE_WIDTH_CHILD; // Or dynamic based on text length
-    const height = NODE_HEIGHT;
+    // Use stored dimensions if available (via resize observer in real app), or defaults
+    const width = node.width || (isRoot ? NODE_WIDTH_ROOT : NODE_WIDTH_CHILD);
+    const height = node.height || NODE_HEIGHT;
 
     return {
       id: nodeId,
@@ -81,7 +81,15 @@ export const recalculateMindMapLayout = (
     });
 
     if (node.children.length > 0) {
-      let currentY = y;
+      // Calculate starting Y for children block
+      // The children block height is calculated by sum of their subtree heights + gaps
+      const childrenBlockHeight = node.children.reduce((acc, c) => acc + calcSubtreeHeight(c), 0) + (node.children.length - 1) * VERTICAL_GAP;
+      
+      // Center the children block relative to the parent's center
+      // Parent center Y = nodeY + node.height/2
+      // Children block top = Parent Center Y - ChildrenBlockHeight/2
+      let currentY = (nodeY + node.height / 2) - (childrenBlockHeight / 2);
+
       const nextX = x + node.width + HORIZONTAL_GAP;
 
       node.children.forEach(child => {
@@ -94,15 +102,12 @@ export const recalculateMindMapLayout = (
 
   const rootHeight = calcSubtreeHeight(root);
   
-  // Keep root at its current visual position (or 0,0 if new)
-  // To avoid the root jumping around, we might want to get the *current* root position from allNodes
+  // Keep root at its current visual position
   const originalRoot = allNodes.find(n => n.id === rootId);
   const startX = originalRoot ? originalRoot.position.x : 0;
   const startY = originalRoot ? originalRoot.position.y : 0;
 
-  // We actually want the subtree centered on the root's Y.
-  // The layout logic `assignPositions` assumes (x,y) is top-left of the bounding box.
-  // So we adjust y:
+  // Adjust Y so the tree grows evenly up and down around the root
   const boundingBoxTop = startY - (rootHeight - NODE_HEIGHT) / 2;
 
   assignPositions(root, startX, boundingBoxTop, rootHeight);

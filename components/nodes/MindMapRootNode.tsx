@@ -7,15 +7,15 @@ const MindMapRootNode = ({ data, selected }: NodeProps) => {
     <div className={`relative group ${selected ? 'z-50' : 'z-10'}`}>
       <div 
         className={`
-          px-6 py-3 rounded-full shadow-lg border-2 transition-all min-w-[120px] text-center
-          ${selected ? 'border-blue-500 ring-2 ring-blue-200' : 'border-blue-600'}
+          px-8 py-4 rounded-xl shadow-xl transition-all min-w-[160px] text-center
+          bg-gradient-to-br from-blue-500 to-blue-600
+          ${selected ? 'ring-4 ring-blue-300/50 scale-105' : 'hover:shadow-2xl hover:scale-105'}
         `}
-        style={{ backgroundColor: '#2563eb', color: 'white' }}
       >
         {data.isEditing ? (
              <input
                 autoFocus
-                className="bg-transparent text-white text-center outline-none w-full font-bold"
+                className="bg-transparent text-white text-center outline-none w-full font-bold text-lg leading-tight"
                 value={data.content}
                 onChange={(e) => data.onContentChange(e.target.value)}
                 onBlur={data.stopEditing}
@@ -24,15 +24,17 @@ const MindMapRootNode = ({ data, selected }: NodeProps) => {
                 }}
              />
         ) : (
-            <span className="font-bold text-lg select-none">{data.content || '中心主题'}</span>
+            <span className="font-bold text-lg text-white select-none leading-tight tracking-wide drop-shadow-md">
+                {data.content || '中心主题'}
+            </span>
         )}
       </div>
       
-      {/* Source Handle (Right) */}
+      {/* Source Handle (Right) - Invisible but functional */}
       <Handle 
         type="source" 
         position={Position.Right} 
-        className="!bg-blue-200 !w-3 !h-3 !-right-1.5" 
+        className="!w-1 !h-1 !opacity-0" 
       />
     </div>
   );

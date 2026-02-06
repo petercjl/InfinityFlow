@@ -13,7 +13,8 @@ import ReactFlow, {
   NodeTypes,
   ReactFlowInstance,
   Panel,
-  MarkerType
+  MarkerType,
+  useReactFlow
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
@@ -38,6 +39,16 @@ const nodeTypes: NodeTypes = {
   'mindmap-root': MindMapRootNode,
   'mindmap-child': MindMapChildNode
 };
+
+// --- Color Palette for Mind Map ---
+const MINDMAP_COLORS = [
+    '#ef4444', // Red
+    '#f59e0b', // Amber
+    '#10b981', // Emerald
+    '#3b82f6', // Blue
+    '#8b5cf6', // Violet
+    '#ec4899', // Pink
+];
 
 // --- Helpers ---
 
@@ -181,7 +192,6 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
         saveTimeoutRef.current = setTimeout(() => {
             setSaveStatus('saving');
             const itemsToSave = nodes.map(nodeToItem);
-            // In a real app, we would also save edges separately or as part of the board data
             saveBoardItems(board.id, itemsToSave).then(() => setSaveStatus('saved'));
         }, 1500);
 
@@ -284,6 +294,142 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
 
     }, [edges, setNodes]);
 
+
+    // --- Advanced Features: Navigation & Reparenting ---
+
+    // Keyboard Navigation (Alt + Arrow)
+    const navigate = useCallback((direction: 'top' | 'bottom' | 'left' | 'right') => {
+        if (!rfInstance) return;
+        
+        const selectedNodes = rfInstance.getNodes().filter(n => n.selected);
+        if (selectedNodes.length !== 1) return;
+
+        const selectedNode = selectedNodes[0];
+        // Allow navigation only on mind map nodes for now to match prompt requirement
+        if (!selectedNode.type?.startsWith('mindmap')) return;
+
+        const { x, y } = selectedNode.position;
+        // Use visual width/height approximation if actual not set yet
+        const nodeWidth = selectedNode.width || (selectedNode.type === 'mindmap-root' ? 180 : 140);
+        const nodeHeight = selectedNode.height || 44;
+        
+        const centerX = x + nodeWidth / 2;
+        const centerY = y + nodeHeight / 2;
+
+        const allMindMapNodes = rfInstance.getNodes().filter(n =>
+            (n.type === 'mindmap-root' || n.type === 'mindmap-child') && !n.hidden && n.id !== selectedNode.id
+        );
+
+        // Filter and Find Closest
+        const candidates = allMindMapNodes.filter(n => {
+            const nW = n.width || 120;
+            const nH = n.height || 40;
+            const nCX = n.position.x + nW / 2;
+            const nCY = n.position.y + nH / 2;
+
+            switch (direction) {
+                case 'right': return n.position.x > x;
+                case 'left': return n.position.x < x;
+                case 'top': return n.position.y < y;
+                case 'bottom': return n.position.y > y;
+            }
+            return false;
+        });
+
+        if (candidates.length === 0) return;
+
+        // Sort by Euclidean distance from center to center
+        candidates.sort((a, b) => {
+            const aW = a.width || 120, aH = a.height || 40;
+            const bW = b.width || 120, bH = b.height || 40;
+            
+            const distA = Math.hypot((a.position.x + aW/2) - centerX, (a.position.y + aH/2) - centerY);
+            const distB = Math.hypot((b.position.x + bW/2) - centerX, (b.position.y + bH/2) - centerY);
+            
+            return distA - distB;
+        });
+
+        const target = candidates[0];
+        
+        // Select target
+        setNodes(nds => nds.map(n => ({ ...n, selected: n.id === target.id })));
+        
+        // Optional: Smooth pan
+        // rfInstance.fitView({ nodes: [target], duration: 300, padding: 2 }); 
+
+    }, [rfInstance, setNodes]);
+
+    // Drag to Reparent
+    const onNodeDragStop = useCallback((event: React.MouseEvent, node: Node) => {
+        if (node.type !== 'mindmap-child') return;
+
+        const allNodes = rfInstance?.getNodes() || [];
+        
+        // Find a nearby node to attach to
+        const nearbyNode = allNodes.find(n => {
+            if (n.id === node.id) return false;
+            // Only attach to other mindmap nodes
+            if (n.type !== 'mindmap-root' && n.type !== 'mindmap-child') return false;
+            if (n.hidden) return false;
+
+            const nWidth = n.width || 150;
+            
+            // Logic: Is 'node' to the right of 'n'?
+            // Distance horizontal: node.x - (n.x + n.width)
+            const dx = node.position.x - (n.position.x + nWidth);
+            const dy = Math.abs(node.position.y - n.position.y);
+
+            // Thresholds: 
+            // Horizontal: 20px to 300px to the right
+            // Vertical: Within 100px up or down
+            return dx > 20 && dx < 300 && dy < 150;
+        });
+
+        if (nearbyNode) {
+            const oldParentId = node.data.parentId;
+            const newParentId = nearbyNode.id;
+
+            // Prevent attaching to own descendant to avoid cycles
+            // Simple check: don't attach if newParent's root is the dragged node (not fully robust but prevents simple loops)
+            if (oldParentId !== newParentId) {
+                // Remove old edge
+                setEdges(eds => {
+                    const filtered = eds.filter(e => !(e.target === node.id));
+                    // Add new edge
+                    const newEdge: Edge = {
+                        id: `e-${newParentId}-${node.id}`,
+                        source: newParentId,
+                        target: node.id,
+                        type: 'default', // Bezier
+                        style: { stroke: nearbyNode.data.color || '#cbd5e1', strokeWidth: 2 }
+                    };
+                    return [...filtered, newEdge];
+                });
+
+                // Update Node Data
+                setNodes(nds => nds.map(n => {
+                    if (n.id === node.id) {
+                        return { 
+                            ...n, 
+                            data: { 
+                                ...n.data, 
+                                parentId: newParentId,
+                                color: nearbyNode.data.color // Inherit new parent color
+                            } 
+                        };
+                    }
+                    return n;
+                }));
+
+                // Trigger Layout
+                setTimeout(() => updateMindMapLayout(newParentId), 50);
+                // Also layout old parent if it exists to close gap
+                if (oldParentId) setTimeout(() => updateMindMapLayout(oldParentId), 50);
+            }
+        }
+    }, [rfInstance, setEdges, setNodes, updateMindMapLayout]);
+
+
     // --- Creation Handlers ---
 
     const handleAddNode = (type: string, content: string = '', itemType?: string) => {
@@ -297,7 +443,6 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
             y = center.y + (Math.random() - 0.5) * 50;
         }
 
-        // Determine if this should be a 'general' node in ReactFlow terms
         const isGeneral = ['shape', 'image', 'video', 'html', 'image-generator', 'video-generator'].includes(itemType || type);
 
         const newNode: Node = {
@@ -317,7 +462,6 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
     };
 
     const handleAddMindMap = () => {
-        // Create a Root Node
         if (!rfInstance) return;
         const center = rfInstance.project({ 
             x: window.innerWidth / 2, 
@@ -333,80 +477,114 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
         };
 
         const child1Id = `child-${Date.now()}-1`;
+        const color1 = MINDMAP_COLORS[0];
         const child1: Node = {
             id: child1Id,
             type: 'mindmap-child',
             position: { x: center.x + 200, y: center.y - 50 },
-            data: { content: '分支 1', rootId: rootId, parentId: rootId }
+            data: { content: '分支 1', rootId: rootId, parentId: rootId, color: color1 }
         };
 
         const child2Id = `child-${Date.now()}-2`;
+        const color2 = MINDMAP_COLORS[1];
         const child2: Node = {
             id: child2Id,
             type: 'mindmap-child',
             position: { x: center.x + 200, y: center.y + 50 },
-            data: { content: '分支 2', rootId: rootId, parentId: rootId }
+            data: { content: '分支 2', rootId: rootId, parentId: rootId, color: color2 }
         };
 
-        const edge1: Edge = { id: `e-${rootId}-${child1Id}`, source: rootId, target: child1Id, type: 'smoothstep', style: { stroke: '#cbd5e1', strokeWidth: 2 } };
-        const edge2: Edge = { id: `e-${rootId}-${child2Id}`, source: rootId, target: child2Id, type: 'smoothstep', style: { stroke: '#cbd5e1', strokeWidth: 2 } };
+        const edge1: Edge = { id: `e-${rootId}-${child1Id}`, source: rootId, target: child1Id, type: 'default', style: { stroke: color1, strokeWidth: 2 } };
+        const edge2: Edge = { id: `e-${rootId}-${child2Id}`, source: rootId, target: child2Id, type: 'default', style: { stroke: color2, strokeWidth: 2 } };
 
         setNodes(nds => [...nds, rootNode, child1, child2]);
         setEdges(eds => [...eds, edge1, edge2]);
         
-        // Trigger Layout after render
         setTimeout(() => updateMindMapLayout(rootId), 50);
     };
 
     // --- Keyboard Shortcuts ---
 
     const handleKeyDown = useCallback((e: KeyboardEvent) => {
-        // Only trigger if we are not editing text inside a node (unless it's a specific shortcut like Tab)
         const isEditing = editingNodeId !== null;
+        
+        // --- 1. Navigation (Alt + Arrows) ---
+        if (e.altKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            e.preventDefault();
+            const keyMap: Record<string, 'top' | 'bottom' | 'left' | 'right'> = {
+                'ArrowUp': 'top',
+                'ArrowDown': 'bottom',
+                'ArrowLeft': 'left',
+                'ArrowRight': 'right'
+            };
+            const direction = keyMap[e.key];
+            if (direction) {
+                navigate(direction);
+            }
+            return;
+        }
+
+        // --- 2. Start Editing (Space) ---
+        if (e.key === ' ' && !isEditing) {
+            const selectedNodes = rfInstance?.getNodes().filter(n => n.selected) || [];
+            if (selectedNodes.length === 1 && selectedNodes[0].type?.startsWith('mindmap')) {
+                e.preventDefault();
+                setEditingNodeId(selectedNodes[0].id);
+                return;
+            }
+        }
+
+        // Only trigger following shortcuts if NOT editing (except specifically handled keys)
         if (isEditing && e.key !== 'Tab' && e.key !== 'Enter') return;
 
         // Get selected node
         const selectedIds = rfInstance?.getNodes().filter(n => n.selected).map(n => n.id) || [];
-        if (selectedIds.length !== 1) return; // Only support single node shortcuts for now
+        if (selectedIds.length !== 1) return; 
 
         const selectedNode = rfInstance?.getNode(selectedIds[0]);
-        if (!selectedNode) return;
-        
-        const isMindMap = selectedNode.type === 'mindmap-root' || selectedNode.type === 'mindmap-child';
-        if (!isMindMap) return;
+        if (!selectedNode || !selectedNode.type?.startsWith('mindmap')) return;
 
-        // 1. TAB: Add Child
+        // --- 3. Add Child (Tab) ---
         if (e.key === 'Tab') {
             e.preventDefault();
             const newId = `node-${Date.now()}`;
+            
+            // Determine Color
+            let newColor = selectedNode.data.color;
+            if (selectedNode.type === 'mindmap-root') {
+                 // Pick a random/next color for root's immediate children
+                 const childCount = edges.filter(ed => ed.source === selectedNode.id).length;
+                 newColor = MINDMAP_COLORS[childCount % MINDMAP_COLORS.length];
+            }
+
             const newNode: Node = {
                 id: newId,
                 type: 'mindmap-child',
                 position: { x: selectedNode.position.x + 150, y: selectedNode.position.y },
-                data: { content: '子主题', rootId: selectedNode.data.rootId, parentId: selectedNode.id }
+                data: { content: '子主题', rootId: selectedNode.data.rootId, parentId: selectedNode.id, color: newColor }
             };
             const newEdge: Edge = {
                 id: `e-${selectedNode.id}-${newId}`,
                 source: selectedNode.id,
                 target: newId,
-                type: 'default', // Bezier by default in RF
-                style: { stroke: '#cbd5e1', strokeWidth: 2 }
+                type: 'default',
+                style: { stroke: newColor, strokeWidth: 2 }
             };
 
             setNodes(nds => [...nds, newNode]);
             setEdges(eds => [...eds, newEdge]);
             
-            setEditingNodeId(newId); // Focus new node
+            setEditingNodeId(newId);
             setTimeout(() => {
                 setNodes(nds => nds.map(n => ({ ...n, selected: n.id === newId })));
                 updateMindMapLayout(selectedNode.id);
             }, 10);
         }
 
-        // 2. ENTER: Add Sibling
+        // --- 4. Add Sibling (Enter) ---
         if (e.key === 'Enter') {
             e.preventDefault();
-            if (selectedNode.type === 'mindmap-root') return; // Root cannot have sibling via Enter
+            if (selectedNode.type === 'mindmap-root') return;
 
             const parentId = selectedNode.data.parentId;
             if (!parentId) return;
@@ -414,18 +592,22 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
             if (!parentNode) return;
 
             const newId = `node-${Date.now()}`;
+            
+            // Sibling inherits same color as current node
+            const color = selectedNode.data.color;
+
             const newNode: Node = {
                 id: newId,
                 type: 'mindmap-child',
                 position: { x: selectedNode.position.x, y: selectedNode.position.y + 50 },
-                data: { content: '分支主题', rootId: selectedNode.data.rootId, parentId: parentId }
+                data: { content: '分支主题', rootId: selectedNode.data.rootId, parentId: parentId, color }
             };
             const newEdge: Edge = {
                 id: `e-${parentId}-${newId}`,
                 source: parentId,
                 target: newId,
                 type: 'default',
-                style: { stroke: '#cbd5e1', strokeWidth: 2 }
+                style: { stroke: color, strokeWidth: 2 }
             };
 
             setNodes(nds => [...nds, newNode]);
@@ -438,10 +620,10 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
             }, 10);
         }
 
-        // 3. DELETE / BACKSPACE
+        // --- 5. Delete ---
         if (e.key === 'Delete' || e.key === 'Backspace') {
-            if (isEditing) return; // Don't delete node if editing text
-            if (selectedNode.type === 'mindmap-root') return; // Prevent root deletion for now (or ask confirm)
+            if (isEditing) return; 
+            if (selectedNode.type === 'mindmap-root') return; 
 
             const parentId = selectedNode.data.parentId;
             
@@ -460,20 +642,13 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
             setNodes(nds => nds.filter(n => !nodesToDelete.includes(n.id)));
             setEdges(eds => eds.filter(ed => !nodesToDelete.includes(ed.source) && !nodesToDelete.includes(ed.target)));
             
-            // Select parent
             if (parentId) {
                 setNodes(nds => nds.map(n => ({ ...n, selected: n.id === parentId })));
                 setTimeout(() => updateMindMapLayout(parentId), 10);
             }
         }
 
-    }, [editingNodeId, rfInstance, edges, updateMindMapLayout, setNodes, setEdges]);
-
-    // Attach Keyboard Listeners
-    useEffect(() => {
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [handleKeyDown]);
+    }, [editingNodeId, rfInstance, edges, updateMindMapLayout, setNodes, setEdges, navigate]);
 
 
     // --- Other Handlers ---
@@ -488,8 +663,6 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
     };
 
     const onSelectionChange = useCallback(({ nodes: selectedNodes }: { nodes: Node[] }) => {
-        // Handle double click to edit is handled via node custom data props, 
-        // but we can also track global selection here for context images etc.
         const imgNodes = selectedNodes.filter(n => n.type === 'general' && n.data.itemType === 'image');
         if (imgNodes.length > 0) {
             const urls = imgNodes.map(n => n.data.content).filter(Boolean);
@@ -529,16 +702,17 @@ const EditorContent: React.FC<CanvasEditorProps> = ({ board, onBack, onRenameBoa
                     nodeTypes={nodeTypes}
                     onInit={setRfInstance}
                     onSelectionChange={onSelectionChange}
+                    onNodeDragStop={onNodeDragStop}
                     onNodeDoubleClick={(e, node) => {
                         // Enter edit mode
-                        if(node.type.startsWith('mindmap')) {
+                        if(node.type?.startsWith('mindmap')) {
                             setEditingNodeId(node.id);
                         }
                     }}
                     fitView
                     snapToGrid
                     snapGrid={[15, 15]}
-                    defaultEdgeOptions={{ type: 'smoothstep', animated: true, style: { strokeWidth: 2, stroke: '#94a3b8' } }}
+                    defaultEdgeOptions={{ type: 'default', animated: false, style: { strokeWidth: 2, stroke: '#cbd5e1' } }}
                     minZoom={0.1}
                     maxZoom={4}
                     proOptions={{ hideAttribution: true }}

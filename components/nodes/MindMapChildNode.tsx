@@ -1,11 +1,11 @@
 
 import React, { memo } from 'react';
 import { Handle, Position, NodeProps } from 'reactflow';
-import { ChevronRight } from 'lucide-react';
 
 const MindMapChildNode = ({ data, selected }: NodeProps) => {
   const hasChildren = data.hasChildren;
   const isCollapsed = data.isCollapsed;
+  const nodeColor = data.color || '#cbd5e1'; // Default gray if no color inherited
 
   return (
     <div className={`relative group ${selected ? 'z-50' : 'z-10'}`}>
@@ -14,19 +14,25 @@ const MindMapChildNode = ({ data, selected }: NodeProps) => {
       <Handle 
         type="target" 
         position={Position.Left} 
-        className="!bg-slate-300 !w-2 !h-2 !-left-1 opacity-0 group-hover:opacity-100 transition-opacity" 
+        className="!w-1 !h-1 !opacity-0" 
       />
 
       <div 
         className={`
-          px-4 py-2 rounded-lg border transition-all min-w-[80px]
-          ${selected ? 'border-blue-500 bg-white shadow-md ring-1 ring-blue-200' : 'border-slate-200 bg-white hover:border-blue-300'}
+          relative px-4 py-2.5 rounded-lg border bg-white transition-all duration-200 min-w-[100px] flex items-center
+          ${selected ? 'shadow-md ring-2 ring-opacity-50' : 'shadow-sm hover:shadow-md hover:scale-[1.02]'}
         `}
+        style={{ 
+            borderColor: selected ? nodeColor : '#e2e8f0',
+            borderLeftWidth: '4px',
+            borderLeftColor: nodeColor,
+            boxShadow: selected ? `0 4px 6px -1px ${nodeColor}33` : undefined // Colored shadow on select
+        }}
       >
         {data.isEditing ? (
              <input
                 autoFocus
-                className="bg-transparent text-slate-800 outline-none w-full text-sm"
+                className="bg-transparent text-slate-800 outline-none w-full text-sm font-medium leading-normal"
                 value={data.content}
                 onChange={(e) => data.onContentChange(e.target.value)}
                 onBlur={data.stopEditing}
@@ -35,7 +41,9 @@ const MindMapChildNode = ({ data, selected }: NodeProps) => {
                 }}
              />
         ) : (
-            <span className="text-sm text-slate-700 select-none">{data.content || '分支主题'}</span>
+            <span className="text-sm font-medium text-slate-700 select-none w-full leading-normal">
+                {data.content || '分支主题'}
+            </span>
         )}
       </div>
 
@@ -46,12 +54,22 @@ const MindMapChildNode = ({ data, selected }: NodeProps) => {
                 e.stopPropagation();
                 if (data.onToggleCollapse) data.onToggleCollapse();
             }}
-            className="absolute -right-2 top-1/2 -translate-y-1/2 w-4 h-4 bg-white border border-slate-300 rounded-full flex items-center justify-center hover:bg-slate-50 hover:border-blue-400 z-20 cursor-pointer shadow-sm"
+            className={`
+                absolute -right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 
+                bg-white border rounded-full flex items-center justify-center 
+                z-20 cursor-pointer shadow-sm transition-transform hover:scale-110
+            `}
+            style={{ borderColor: nodeColor }}
         >
             {isCollapsed ? (
-                <span className="text-[8px] font-bold text-slate-500 flex items-center justify-center w-full h-full">+</span>
+                <span 
+                    className="text-[10px] font-bold leading-none flex items-center justify-center w-full h-full pb-0.5"
+                    style={{ color: nodeColor }}
+                >
+                    +
+                </span>
             ) : (
-                <div className="w-1 h-1 bg-slate-400 rounded-full" />
+                <div className="w-1.5 h-1.5 rounded-full opacity-50" style={{ backgroundColor: nodeColor }} />
             )}
         </button>
       )}
@@ -60,7 +78,7 @@ const MindMapChildNode = ({ data, selected }: NodeProps) => {
       <Handle 
         type="source" 
         position={Position.Right} 
-        className="!bg-slate-300 !w-2 !h-2 !-right-1 opacity-0 group-hover:opacity-100 transition-opacity" 
+        className="!w-1 !h-1 !opacity-0" 
       />
     </div>
   );
