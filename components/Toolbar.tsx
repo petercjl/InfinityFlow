@@ -1,7 +1,8 @@
 import React from 'react';
-import { Square, Type, MousePointer2, Image as ImageIcon, Video } from 'lucide-react';
+import { Square, Type, MousePointer2, Image as ImageIcon, Video, StickyNote } from 'lucide-react';
 
 interface ToolbarProps {
+  onAddText: () => void;
   onAddNote: () => void;
   onAddShape: () => void;
   onAddImageGen: () => void;
@@ -11,6 +12,7 @@ interface ToolbarProps {
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({ 
+  onAddText,
   onAddNote, 
   onAddShape,
   onAddImageGen,
@@ -36,8 +38,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
         <div className="h-px w-full bg-slate-200 my-1"></div>
 
-        <button className={btnClass(false)} onClick={onAddNote} title="添加便签">
+        <button className={btnClass(false)} onClick={onAddText} title="添加文本">
           <Type size={20} />
+        </button>
+        <button className={btnClass(false)} onClick={onAddNote} title="添加便签">
+          <StickyNote size={20} />
         </button>
         <button className={btnClass(false)} onClick={onAddShape} title="添加形状">
           <Square size={20} />

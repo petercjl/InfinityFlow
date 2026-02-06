@@ -1,5 +1,5 @@
 
-export type ItemType = 'note' | 'image' | 'video' | 'shape' | 'mindmap' | 'report' | 'html' | 'image-generator' | 'video-generator';
+export type ItemType = 'note' | 'text' | 'image' | 'video' | 'shape' | 'mindmap' | 'report' | 'html' | 'image-generator' | 'video-generator';
 
 export interface CanvasItem {
   id: string;
@@ -10,7 +10,13 @@ export interface CanvasItem {
   height: number;
   content?: string; // Text content, Image/Video URL, or HTML string
   color?: string;
-  meta?: any; // For extra data like original prompt, analysis source, etc.
+  meta?: {
+    fontSize?: number;
+    fontFamily?: string;
+    fontWeight?: string;
+    backgroundColor?: string;
+    [key: string]: any; // For extra data like original prompt, analysis source, etc.
+  }; 
 }
 
 export type FileCategory = 

@@ -201,6 +201,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
     
     // Determine dimensions based on type
     const getTypeDims = (type: string) => {
+        if (type === 'text') return { w: 200, h: 100 };
         if (type === 'note') return { w: 200, h: 200 };
         if (type === 'html') return { w: 500, h: 600 };
         if (type === 'image-generator') return { w: 400, h: 480 }; // Includes space for control panel
@@ -225,13 +226,30 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
             y: currentY,
             width: dims.w,
             height: dims.h,
-            content: data.content
+            content: data.content,
+            color: data.type === 'note' ? '#fef3c7' : '#ffffff', // Default color for note
+            meta: { fontSize: 14, fontFamily: 'sans-serif' }
         };
         newCanvasItems.push(newItem);
         currentX += dims.w + GAP;
     });
     
     setItems(prev => [...prev, ...newCanvasItems]);
+    // Select the last added item
+    if(newCanvasItems.length > 0) {
+        setSelectedId(newCanvasItems[newCanvasItems.length-1].id);
+    }
+  };
+
+  const handleUpdateItem = (itemId: string, updates: Partial<CanvasItem>) => {
+      setItems(prev => prev.map(item => 
+          item.id === itemId ? { ...item, ...updates } : item
+      ));
+  };
+
+  const handleDeleteItem = (itemId: string) => {
+      setItems(prev => prev.filter(item => item.id !== itemId));
+      setSelectedId(null);
   };
 
   // --- Event Handlers ---
@@ -252,8 +270,6 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
   // Optimized: Only run when selectedId changes, NOT when items change (to avoid re-adding on drag)
   useEffect(() => {
     if (selectedId) {
-        // We use the current state of items here. 
-        // Since this effect only runs on selectedId change, we don't worry about stale items during drag.
         const item = items.find(i => i.id === selectedId);
         if (item && item.type === 'image' && item.content) {
             setContextImages(prev => {
@@ -299,6 +315,9 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return; 
+    
+    // If we are clicking on the canvas (background), deselect
+    // NOTE: CanvasItem stops propagation on its own pointer down events, so this only fires for background
     dragStartRef.current = { x: e.clientX, y: e.clientY };
     setIsDragging(true);
     isPanningRef.current = true; 
@@ -365,6 +384,9 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
                     key={item.id} 
                     item={item} 
                     isSelected={selectedId === item.id}
+                    scale={view.scale}
+                    onUpdate={(updates) => handleUpdateItem(item.id, updates)}
+                    onDelete={() => handleDeleteItem(item.id)}
                     onSelect={(e) => {
                         e.stopPropagation(); 
                         setSelectedId(item.id);
@@ -431,6 +453,7 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
         </div>
 
         <Toolbar 
+            onAddText={() => addItems([{ type: 'text', content: '输入文本' }])}
             onAddNote={() => addItems([{ type: 'note', content: '新想法' }])}
             onAddShape={() => addItems([{ type: 'shape', content: '' }])}
             onAddImageGen={() => addItems([{ type: 'image-generator', content: '' }])}

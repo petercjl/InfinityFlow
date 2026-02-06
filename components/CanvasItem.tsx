@@ -1,24 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { CanvasItem as CanvasItemType } from '../types';
-import ReactMarkdown from 'react-markdown';
-import { Image as ImageIcon, Video, Play, Zap, ChevronDown, Plus } from 'lucide-react';
+import { Image as ImageIcon, Video, Play, Zap, ChevronDown, Plus, Trash2, Bold } from 'lucide-react';
 import { generateImage, generateVideo } from '../services/geminiService';
 
 interface CanvasItemProps {
   item: CanvasItemType;
   isSelected: boolean;
+  scale: number;
   onSelect: (e: React.PointerEvent) => void;
+  onUpdate: (updates: Partial<CanvasItemType>) => void;
+  onDelete: () => void;
 }
 
 const GeneratorWidget: React.FC<{
     type: 'image' | 'video';
     item: CanvasItemType;
     isSelected: boolean;
-}> = ({ type, item, isSelected }) => {
+    onUpdate: (updates: Partial<CanvasItemType>) => void;
+}> = ({ type, item, isSelected, onUpdate }) => {
     const [prompt, setPrompt] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
-    // If item.content exists, it means we have a result.
-    const [result, setResult] = useState<string | null>(item.content || null);
+    // Use local state for immediate feedback, but sync via props ideally
+    // Using item.content as the source of truth
+    const result = item.content || null;
     
     // Config State
     const [model, setModel] = useState(type === 'image' ? 'nano-banana-2-4k' : 'veo3');
@@ -32,13 +36,11 @@ const GeneratorWidget: React.FC<{
         try {
             if (type === 'image') {
                 const url = await generateImage(prompt, model);
-                setResult(url);
-                // In a real app, update the parent item.content here
+                onUpdate({ content: url });
             } else {
-                // Using Veo as the real backed, but UI says Kling per screenshot requirements (simulation)
                 const realModel = model.includes('veo') ? model : 'veo3';
                 const url = await generateVideo(prompt, realModel);
-                setResult(url);
+                onUpdate({ content: url });
             }
         } catch (e) {
             console.error(e);
@@ -143,8 +145,13 @@ const GeneratorWidget: React.FC<{
     );
 }
 
-export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, onSelect }) => {
-  
+// Helper to calculate resizing
+type ResizeDirection = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w';
+
+export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, scale, onSelect, onUpdate, onDelete }) => {
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartRef = useRef<{ x: number, y: number, w: number, h: number, ix: number, iy: number } | null>(null);
+
   const baseStyle: React.CSSProperties = {
     position: 'absolute',
     left: item.x,
@@ -161,28 +168,151 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, onSele
 
   // For generators, we remove the bg-white so the custom widget style shows
   const isGenerator = item.type === 'image-generator' || item.type === 'video-generator';
-  const contentClass = `w-full h-full transition-shadow ${isGenerator ? '' : 'bg-white rounded-lg overflow-hidden'} ` + selectionClass;
+  // Text boxes have specific style (no shadow if plain text usually, but let's keep consistent selection)
+  // Notes have shadow and color.
+  // Text has white bg and border.
+  const isText = item.type === 'text';
+  
+  let containerClass = `w-full h-full transition-shadow ${isGenerator ? '' : 'rounded-lg overflow-visible'} ${selectionClass}`;
+  if (item.type === 'text') {
+      containerClass = `w-full h-full transition-shadow ${selectionClass} bg-white/90 backdrop-blur-sm border border-slate-200`;
+  }
+
+  // Handle Resize
+  const handleResizeStart = (e: React.PointerEvent, dir: ResizeDirection) => {
+    e.stopPropagation();
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setIsResizing(true);
+    resizeStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        w: item.width,
+        h: item.height,
+        ix: item.x,
+        iy: item.y
+    };
+  };
+
+  const handleResizeMove = (e: React.PointerEvent, dir: ResizeDirection) => {
+      if (!isResizing || !resizeStartRef.current) return;
+      e.stopPropagation();
+
+      const start = resizeStartRef.current;
+      const dx = (e.clientX - start.x) / scale;
+      const dy = (e.clientY - start.y) / scale;
+
+      let newW = start.w;
+      let newH = start.h;
+      let newX = start.ix;
+      let newY = start.iy;
+
+      if (dir.includes('e')) newW = Math.max(50, start.w + dx);
+      if (dir.includes('s')) newH = Math.max(50, start.h + dy);
+      if (dir.includes('w')) {
+          const w = Math.max(50, start.w - dx);
+          newW = w;
+          newX = start.ix + (start.w - w);
+      }
+      if (dir.includes('n')) {
+          const h = Math.max(50, start.h - dy);
+          newH = h;
+          newY = start.iy + (start.h - h);
+      }
+
+      onUpdate({ x: newX, y: newY, width: newW, height: newH });
+  };
+
+  const handleResizeEnd = (e: React.PointerEvent) => {
+      setIsResizing(false);
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      resizeStartRef.current = null;
+  };
+
+  // Property Menu Helpers
+  const updateMeta = (key: string, value: any) => {
+      onUpdate({ meta: { ...item.meta, [key]: value } });
+  };
+
+  const renderResizeHandle = (dir: ResizeDirection) => {
+      const cursorMap: Record<string, string> = {
+          nw: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', se: 'nwse-resize',
+          n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize'
+      };
+      
+      const posStyle: React.CSSProperties = {};
+      const size = 10;
+      const offset = -5;
+
+      if (dir.includes('n')) posStyle.top = offset;
+      if (dir.includes('s')) posStyle.bottom = offset;
+      if (dir.includes('w')) posStyle.left = offset;
+      if (dir.includes('e')) posStyle.right = offset;
+      
+      // Center middle handles
+      if (dir === 'n' || dir === 's') posStyle.left = '50%', posStyle.marginLeft = -size/2;
+      if (dir === 'w' || dir === 'e') posStyle.top = '50%', posStyle.marginTop = -size/2;
+
+      return (
+          <div 
+            key={dir}
+            className="absolute bg-white border border-blue-500 rounded-full z-50 hover:bg-blue-100"
+            style={{ 
+                ...posStyle, 
+                width: size, 
+                height: size, 
+                cursor: cursorMap[dir] 
+            }}
+            onPointerDown={(e) => handleResizeStart(e, dir)}
+            onPointerMove={(e) => handleResizeMove(e, dir)}
+            onPointerUp={handleResizeEnd}
+          />
+      );
+  };
 
   const renderContent = () => {
     switch (item.type) {
       case 'note':
         return (
           <div 
-            className={`w-full h-full p-4 text-slate-800 font-handwriting shadow-md rounded-lg overflow-hidden ${selectionClass}`}
-            style={{ backgroundColor: item.color || '#fef3c7' }}
+            className={`w-full h-full p-4 text-slate-800 font-handwriting shadow-md rounded-lg overflow-hidden flex flex-col`}
+            style={{ 
+                backgroundColor: item.color || '#fef3c7',
+                fontFamily: item.meta?.fontFamily || 'sans-serif',
+                fontSize: `${item.meta?.fontSize || 16}px`
+            }}
           >
-             <div className="font-semibold mb-1 text-xs opacity-50 uppercase tracking-wider">便签</div>
+             <div className="font-semibold mb-1 text-xs opacity-50 uppercase tracking-wider select-none">便签</div>
             <textarea 
               className="w-full h-full bg-transparent resize-none outline-none text-sm placeholder-slate-500/50"
-              defaultValue={item.content}
+              value={item.content || ''}
+              onChange={(e) => onUpdate({ content: e.target.value })}
               onPointerDown={(e) => e.stopPropagation()} // Allow text selection
             />
           </div>
         );
+      case 'text':
+          return (
+            <div 
+                className="w-full h-full p-2 flex flex-col"
+                style={{
+                    fontFamily: item.meta?.fontFamily || 'sans-serif',
+                    fontSize: `${item.meta?.fontSize || 14}px`
+                }}
+            >
+                <textarea 
+                    className="w-full h-full bg-transparent resize-none outline-none placeholder-slate-400"
+                    placeholder="在此输入文本..."
+                    value={item.content || ''}
+                    onChange={(e) => onUpdate({ content: e.target.value })}
+                    onPointerDown={(e) => e.stopPropagation()}
+                />
+            </div>
+          );
       case 'shape':
         return (
           <div 
-            className={`w-full h-full flex items-center justify-center border-2 border-slate-800 rounded-lg bg-white ${selectionClass}`}
+            className={`w-full h-full flex items-center justify-center border-2 border-slate-800 rounded-lg bg-white`}
             style={{ backgroundColor: item.color || '#fff' }}
           >
             <span className="text-xs text-slate-400">形状</span>
@@ -190,7 +320,7 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, onSele
         );
       case 'image':
         return (
-          <div className={`w-full h-full bg-slate-100 flex items-center justify-center relative group rounded-lg overflow-hidden ${selectionClass}`}>
+          <div className={`w-full h-full bg-slate-100 flex items-center justify-center relative group rounded-lg overflow-hidden`}>
              {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={item.content} alt="canvas content" className="w-full h-full object-cover pointer-events-none" />
             <div className="absolute bottom-2 right-2 bg-black/50 text-white text-[10px] px-2 py-1 rounded backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
@@ -200,17 +330,17 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, onSele
         );
       case 'video':
         return (
-          <div className={`w-full h-full bg-black flex items-center justify-center rounded-xl overflow-hidden shadow-xl border border-slate-800 ${selectionClass}`}>
+          <div className={`w-full h-full bg-black flex items-center justify-center rounded-xl overflow-hidden shadow-xl border border-slate-800`}>
             <video src={item.content} controls className="w-full h-full object-cover" />
           </div>
         );
       case 'image-generator':
-          return <GeneratorWidget type="image" item={item} isSelected={isSelected} />;
+          return <GeneratorWidget type="image" item={item} isSelected={isSelected} onUpdate={onUpdate} />;
       case 'video-generator':
-          return <GeneratorWidget type="video" item={item} isSelected={isSelected} />;
+          return <GeneratorWidget type="video" item={item} isSelected={isSelected} onUpdate={onUpdate} />;
       case 'html': 
         return (
-          <div className={`w-full h-full bg-white flex flex-col shadow-xl border border-slate-200 rounded-lg overflow-hidden ${selectionClass}`}>
+          <div className={`w-full h-full bg-white flex flex-col shadow-xl border border-slate-200 rounded-lg overflow-hidden`}>
              <div className="h-9 bg-slate-50 border-b border-slate-200 flex items-center justify-between px-3 shrink-0">
                 <div className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full bg-red-400/20 border border-red-400"></div>
@@ -229,7 +359,7 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, onSele
       case 'mindmap': 
         const data = JSON.parse(item.content || '{}');
         return (
-             <div className={`w-full h-full bg-white border border-slate-200 flex flex-col shadow-lg p-4 rounded-lg overflow-hidden ${selectionClass}`}>
+             <div className={`w-full h-full bg-white border border-slate-200 flex flex-col shadow-lg p-4 rounded-lg overflow-hidden`}>
                 <h3 className="font-bold text-lg mb-4 text-center border-b pb-2">{data.title}</h3>
                 <div className="flex flex-col gap-4 overflow-y-auto">
                     {data.sections?.map((sec: any, idx: number) => (
@@ -242,7 +372,7 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, onSele
              </div>
         );
       default:
-        return <div className={contentClass}>Unknown</div>;
+        return <div className="w-full h-full flex items-center justify-center bg-white border">Unknown</div>;
     }
   };
 
@@ -252,14 +382,73 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, onSele
       onPointerDown={onSelect}
       className="select-none"
     >
-      {renderContent()}
+        {/* Floating Property Menu */}
+        {isSelected && (
+            <div 
+                className="absolute -top-12 left-0 h-10 bg-white rounded-lg shadow-xl border border-slate-200 flex items-center gap-1 p-1 z-50 animate-in slide-in-from-bottom-2 duration-200"
+                onPointerDown={(e) => e.stopPropagation()}
+            >
+                {(item.type === 'note' || item.type === 'shape') && (
+                    <input 
+                        type="color" 
+                        value={item.color || '#ffffff'} 
+                        onChange={(e) => onUpdate({ color: e.target.value })}
+                        className="w-8 h-8 rounded cursor-pointer border-0 p-0 overflow-hidden" 
+                    />
+                )}
+                
+                {(item.type === 'text' || item.type === 'note') && (
+                    <>
+                        <div className="h-4 w-px bg-slate-200 mx-1" />
+                        <select 
+                            value={item.meta?.fontSize || 14}
+                            onChange={(e) => updateMeta('fontSize', parseInt(e.target.value))}
+                            className="text-xs bg-slate-50 border border-slate-200 rounded px-1 py-1 outline-none focus:border-blue-500"
+                        >
+                            <option value={12}>12px</option>
+                            <option value={14}>14px</option>
+                            <option value={16}>16px</option>
+                            <option value={20}>20px</option>
+                            <option value={24}>24px</option>
+                            <option value={32}>32px</option>
+                        </select>
+                        <select 
+                             value={item.meta?.fontFamily || 'sans-serif'}
+                             onChange={(e) => updateMeta('fontFamily', e.target.value)}
+                             className="text-xs bg-slate-50 border border-slate-200 rounded px-1 py-1 outline-none focus:border-blue-500 w-24"
+                        >
+                            <option value="sans-serif">无衬线</option>
+                            <option value="serif">衬线体</option>
+                            <option value="monospace">等宽</option>
+                            <option value="cursive">手写体</option>
+                        </select>
+                    </>
+                )}
+
+                <div className="h-4 w-px bg-slate-200 mx-1" />
+                <button 
+                    onClick={onDelete} 
+                    className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                >
+                    <Trash2 size={16} />
+                </button>
+            </div>
+        )}
+
+      <div className={containerClass}>
+          {renderContent()}
+      </div>
       
       {isSelected && (
         <>
-          <div className="absolute -top-3 -left-3 w-4 h-4 bg-white border border-blue-500 rounded-full cursor-nwse-resize" />
-          <div className="absolute -top-3 -right-3 w-4 h-4 bg-white border border-blue-500 rounded-full cursor-nesw-resize" />
-          <div className="absolute -bottom-3 -left-3 w-4 h-4 bg-white border border-blue-500 rounded-full cursor-nesw-resize" />
-          <div className="absolute -bottom-3 -right-3 w-4 h-4 bg-white border border-blue-500 rounded-full cursor-nwse-resize" />
+          {renderResizeHandle('nw')}
+          {renderResizeHandle('n')}
+          {renderResizeHandle('ne')}
+          {renderResizeHandle('e')}
+          {renderResizeHandle('se')}
+          {renderResizeHandle('s')}
+          {renderResizeHandle('sw')}
+          {renderResizeHandle('w')}
         </>
       )}
     </div>
