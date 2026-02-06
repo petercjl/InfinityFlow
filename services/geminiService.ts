@@ -62,7 +62,7 @@ export const chatWithAgent = async (
   message: string, 
   contextImages: string[], 
   mode: 'CHAT' | 'IMAGE_GEN' | 'VIDEO_GEN', 
-  systemInstruction?: string,
+  systemInstruction?: string, 
   modelId?: string
 ): Promise<{ text?: string, media?: { type: 'image' | 'video', url: string } }> => {
   try {
@@ -115,6 +115,23 @@ export const runAnalysisWorkflow = async (files: ProjectFile[], userQuery: strin
     console.error("Analysis workflow failed", e);
     return "<p>生成报告时出错，请检查网络连接。</p>";
   }
+};
+
+/**
+ * Get Board Items from Backend API
+ * GET /api/boards/{boardId}/items
+ */
+export const getBoardItems = async (boardId: string): Promise<CanvasItem[]> => {
+    try {
+        const response = await fetch(`${API_BASE}/boards/${boardId}/items`);
+        if (!response.ok) {
+            throw new Error(`API error: ${response.status}`);
+        }
+        return await response.json();
+    } catch (e) {
+        console.error("Failed to get board items", e);
+        return [];
+    }
 };
 
 /**

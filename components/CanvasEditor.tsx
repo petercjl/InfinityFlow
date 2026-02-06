@@ -4,7 +4,7 @@ import { Toolbar } from './Toolbar';
 import { CanvasItem as CanvasItemComponent } from './CanvasItem';
 import { RightSidebar } from './RightSidebar';
 import { ChevronLeft, ChevronRight, Edit2, Cloud, Check, Loader2 } from 'lucide-react';
-import { saveBoardItems } from '../services/geminiService';
+import { saveBoardItems, getBoardItems } from '../services/geminiService';
 
 // Initial Mock Files
 const INITIAL_FILES: ProjectFile[] = [
@@ -39,10 +39,12 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [files, setFiles] = useState<ProjectFile[]>(INITIAL_FILES);
+  const [isLoading, setIsLoading] = useState(true);
   
   // Save Status State
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ignoreNextSaveRef = useRef(true); // Ignore initial render save
   
   // Header Title Editing State
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -75,9 +77,33 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
       }
   };
 
+  // Load items from backend on mount
+  useEffect(() => {
+      let isMounted = true;
+      const loadItems = async () => {
+          setIsLoading(true);
+          const backendItems = await getBoardItems(board.id);
+          
+          if (isMounted) {
+              if (backendItems && backendItems.length > 0) {
+                  ignoreNextSaveRef.current = true; // Prevent triggering auto-save
+                  setItems(backendItems);
+              }
+              setIsLoading(false);
+              setSaveStatus('saved');
+          }
+      };
+      loadItems();
+      return () => { isMounted = false; };
+  }, [board.id]);
+
   // Debounce Effect: Trigger save 1.5s after items change
   useEffect(() => {
-      // Skip initial load or if items are identical to props (optimization optional)
+      // Check if we should ignore this change (initial load)
+      if (ignoreNextSaveRef.current) {
+          ignoreNextSaveRef.current = false;
+          return;
+      }
       
       if (saveTimeoutRef.current) {
           clearTimeout(saveTimeoutRef.current);
@@ -303,6 +329,17 @@ export const CanvasEditor: React.FC<CanvasEditorProps> = ({ board, onBack, onRen
   return (
     <div className="w-full h-full relative bg-slate-100 overflow-hidden font-sans flex">
       <div className="flex-1 relative h-full overflow-hidden">
+        
+        {/* Loading Overlay */}
+        {isLoading && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-100/50 backdrop-blur-sm">
+                <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="animate-spin text-blue-600" size={32} />
+                    <p className="text-sm text-slate-500 font-medium">正在加载画板内容...</p>
+                </div>
+            </div>
+        )}
+
         <div 
             ref={canvasRef}
             className={`w-full h-full touch-none ${isPanningRef.current ? 'cursor-grabbing' : 'cursor-grab'}`}
